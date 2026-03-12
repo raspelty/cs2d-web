@@ -66,10 +66,7 @@ export const dust2Map: GameMap = {
     w(MAP_WIDTH - 20, 0, 20, MAP_HEIGHT),
 
     // T Spawn - FIXED: Open area, not boxing player in
-    w(20, 600, 380, 20),
-    w(20, 1400, 380, 20),
-    w(400, 600, 20, 400),
-    w(400, 1100, 20, 300),
+   
 
     // Long A
     w(420, 200, 1400, 20),
