@@ -14,32 +14,40 @@ const GameCanvas = () => {
 
   const getMenuButtonBounds = useCallback((canvas: HTMLCanvasElement) => {
     const w = canvas.width, h = canvas.height;
-    return { x: w / 2 - 110, y: h / 2 + 105, w: 220, h: 44 };
+    return { x: w / 2 - 100, y: h / 2 + 160, w: 200, h: 50 };
   }, []);
 
   const getTeamButtonBounds = useCallback((canvas: HTMLCanvasElement, team: 'ct' | 't') => {
     const w = canvas.width, h = canvas.height;
-    const btnW = 150, btnH = 36;
-    if (team === 't') return { x: w / 2 - btnW - 15, y: h / 2 - 40, w: btnW, h: btnH };
-    return { x: w / 2 + 15, y: h / 2 - 40, w: btnW, h: btnH };
+    const btnW = 120, btnH = 40;
+    if (team === 't') return { x: w / 2 - 140, y: h / 2 + 20, w: btnW, h: btnH };
+    return { x: w / 2 + 20, y: h / 2 + 20, w: btnW, h: btnH };
   }, []);
 
   const getMapButtonBounds = useCallback((canvas: HTMLCanvasElement, index: number) => {
     const w = canvas.width, h = canvas.height;
-    const mapBtnW = 120, mapBtnH = 28;
-    const totalW = MAPS.length * (mapBtnW + 10);
-    const mbx = w / 2 - totalW / 2 + index * (mapBtnW + 10);
-    const mby = h / 2 - 110;
-    return { x: mbx, y: mby, w: mapBtnW, h: mapBtnH };
+    const mapBtnW = 120, mapBtnH = 40;
+    const x = w / 2 - 150 + index * 200;
+    const y = h / 2 - 60;
+    return { x, y, w: mapBtnW, h: mapBtnH };
+  }, []);
+
+  const getSliderBounds = useCallback((canvas: HTMLCanvasElement, type: 'enemy' | 'ally') => {
+    const w = canvas.width, h = canvas.height;
+    const sliderW = 300;
+    const sliderX = w / 2 - sliderW / 2;
+    const sliderY = type === 'enemy' ? h / 2 + 90 : h / 2 + 130;
+    return { x: sliderX, y: sliderY, w: sliderW, h: 10 };
   }, []);
 
   const getSliderValue = useCallback((canvas: HTMLCanvasElement, mouseX: number, type: 'enemy' | 'ally'): number => {
-    const w = canvas.width;
-    const sliderW = 200, sliderX = w / 2 - sliderW / 2;
-    const t = Math.max(0, Math.min(1, (mouseX - sliderX) / sliderW));
-    if (type === 'enemy') return Math.round(t * 9) + 1;
-    return Math.round(t * 9);
-  }, []);
+    const bounds = getSliderBounds(canvas, type);
+    const clampedX = Math.max(bounds.x, Math.min(mouseX, bounds.x + bounds.w));
+    const t = (clampedX - bounds.x) / bounds.w;
+    
+    if (type === 'enemy') return Math.round(t * 9) + 1; // 1-10
+    return Math.round(t * 9); // 0-9
+  }, [getSliderBounds]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -47,7 +55,10 @@ const GameCanvas = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const resize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
+    const resize = () => { 
+      canvas.width = window.innerWidth; 
+      canvas.height = window.innerHeight; 
+    };
     resize();
     window.addEventListener('resize', resize);
 
@@ -66,7 +77,10 @@ const GameCanvas = () => {
         if (key === 'escape' && state.buyMenuOpen) state.buyMenuOpen = false;
 
         if (state.buyMenuOpen) {
-          if (key >= '1' && key <= '5') { state.buyMenuCategory = parseInt(key) - 1; state.buyMenuSelection = 0; }
+          if (key >= '1' && key <= '5') { 
+            state.buyMenuCategory = parseInt(key) - 1; 
+            state.buyMenuSelection = 0; 
+          }
           if (key === 'arrowup') state.buyMenuSelection = Math.max(0, state.buyMenuSelection - 1);
           if (key === 'arrowdown') {
             const cat = BUY_CATEGORIES[state.buyMenuCategory];
@@ -88,7 +102,10 @@ const GameCanvas = () => {
           state.player.jumpTimer = 0.4;
         }
 
-        if (key === 'f') { state.player.inspecting = true; state.player.inspectTimer = 3; }
+        if (key === 'f') { 
+          state.player.inspecting = true; 
+          state.player.inspectTimer = 3; 
+        }
 
         if (key === 'r' && (state.roundStatus === 'won' || state.roundStatus === 'lost' || state.matchOver)) {
           if (state.matchOver) {
@@ -101,33 +118,45 @@ const GameCanvas = () => {
       }
     };
 
-    const onKeyUp = (e: KeyboardEvent) => { state.keys.delete(e.key.toLowerCase()); };
+    const onKeyUp = (e: KeyboardEvent) => { 
+      state.keys.delete(e.key.toLowerCase()); 
+    };
 
     const onMouseMove = (e: MouseEvent) => {
-      state.mousePos = { x: e.clientX, y: e.clientY };
+      // Get canvas-relative coordinates
+      const rect = canvas.getBoundingClientRect();
+      const canvasX = (e.clientX - rect.left) * (canvas.width / rect.width);
+      const canvasY = (e.clientY - rect.top) * (canvas.height / rect.height);
+      
+      state.mousePos = { x: canvasX, y: canvasY };
 
       if (state.gamePhase === 'menu') {
         const btn = getMenuButtonBounds(canvas);
-        state.hoveredButton = e.clientX >= btn.x && e.clientX <= btn.x + btn.w &&
-          e.clientY >= btn.y && e.clientY <= btn.y + btn.h ? 'start' : null;
+        state.hoveredButton = canvasX >= btn.x && canvasX <= btn.x + btn.w &&
+          canvasY >= btn.y && canvasY <= btn.y + btn.h ? 'start' : null;
 
         if (isDraggingSlider.current === 'enemy') {
-          state.enemyCount = getSliderValue(canvas, e.clientX, 'enemy');
+          state.enemyCount = getSliderValue(canvas, canvasX, 'enemy');
         } else if (isDraggingSlider.current === 'ally') {
-          state.allyCount = getSliderValue(canvas, e.clientX, 'ally');
+          state.allyCount = getSliderValue(canvas, canvasX, 'ally');
         }
       }
     };
 
     const onMouseDown = (e: MouseEvent) => {
+      // Get canvas-relative coordinates
+      const rect = canvas.getBoundingClientRect();
+      const canvasX = (e.clientX - rect.left) * (canvas.width / rect.width);
+      const canvasY = (e.clientY - rect.top) * (canvas.height / rect.height);
+
       if (state.gamePhase === 'menu') {
         if (e.button !== 0) return;
-        const w = canvas.width, h = canvas.height;
 
         // Map buttons
         for (let i = 0; i < MAPS.length; i++) {
           const mb = getMapButtonBounds(canvas, i);
-          if (e.clientX >= mb.x && e.clientX <= mb.x + mb.w && e.clientY >= mb.y && e.clientY <= mb.y + mb.h) {
+          if (canvasX >= mb.x && canvasX <= mb.x + mb.w && 
+              canvasY >= mb.y && canvasY <= mb.y + mb.h) {
             state.selectedMapIndex = i;
             return;
           }
@@ -135,31 +164,38 @@ const GameCanvas = () => {
 
         const tBtn = getTeamButtonBounds(canvas, 't');
         const ctBtn = getTeamButtonBounds(canvas, 'ct');
-        if (e.clientX >= tBtn.x && e.clientX <= tBtn.x + tBtn.w && e.clientY >= tBtn.y && e.clientY <= tBtn.y + tBtn.h) {
-          state.playerTeam = 't'; return;
+        
+        if (canvasX >= tBtn.x && canvasX <= tBtn.x + tBtn.w && 
+            canvasY >= tBtn.y && canvasY <= tBtn.y + tBtn.h) {
+          state.playerTeam = 't';
+          return;
         }
-        if (e.clientX >= ctBtn.x && e.clientX <= ctBtn.x + ctBtn.w && e.clientY >= ctBtn.y && e.clientY <= ctBtn.y + ctBtn.h) {
-          state.playerTeam = 'ct'; return;
+        
+        if (canvasX >= ctBtn.x && canvasX <= ctBtn.x + ctBtn.w && 
+            canvasY >= ctBtn.y && canvasY <= ctBtn.y + ctBtn.h) {
+          state.playerTeam = 'ct';
+          return;
         }
 
         // Enemy slider
-        const sliderY = h / 2 + 25;
-        if (Math.abs(e.clientY - (sliderY + 4)) < 15) {
+        const enemySlider = getSliderBounds(canvas, 'enemy');
+        if (canvasY >= enemySlider.y - 10 && canvasY <= enemySlider.y + enemySlider.h + 10) {
           isDraggingSlider.current = 'enemy';
-          state.enemyCount = getSliderValue(canvas, e.clientX, 'enemy');
+          state.enemyCount = getSliderValue(canvas, canvasX, 'enemy');
           return;
         }
 
         // Ally slider
-        const aSliderY = h / 2 + 70;
-        if (Math.abs(e.clientY - (aSliderY + 4)) < 15) {
+        const allySlider = getSliderBounds(canvas, 'ally');
+        if (canvasY >= allySlider.y - 10 && canvasY <= allySlider.y + allySlider.h + 10) {
           isDraggingSlider.current = 'ally';
-          state.allyCount = getSliderValue(canvas, e.clientX, 'ally');
+          state.allyCount = getSliderValue(canvas, canvasX, 'ally');
           return;
         }
 
         const btn = getMenuButtonBounds(canvas);
-        if (e.clientX >= btn.x && e.clientX <= btn.x + btn.w && e.clientY >= btn.y && e.clientY <= btn.y + btn.h) {
+        if (canvasX >= btn.x && canvasX <= btn.x + btn.w && 
+            canvasY >= btn.y && canvasY <= btn.y + btn.h) {
           state.gamePhase = 'playing';
           setIsMenu(false);
           startNewMatch(state);
@@ -169,6 +205,7 @@ const GameCanvas = () => {
 
       // Right click = scope for snipers
       if (e.button === 2) {
+        e.preventDefault();
         const weaponDef = WEAPONS[state.player.weapon.id];
         if (weaponDef && weaponDef.type === 'sniper' && state.player.alive) {
           state.player.isScoped = !state.player.isScoped;
@@ -192,6 +229,7 @@ const GameCanvas = () => {
       if (e.button === 0) state.mouseDown = false;
       isDraggingSlider.current = null;
     };
+
     const onContextMenu = (e: Event) => e.preventDefault();
 
     window.addEventListener('keydown', onKeyDown);
@@ -216,6 +254,7 @@ const GameCanvas = () => {
 
       rafRef.current = requestAnimationFrame(loop);
     };
+    
     rafRef.current = requestAnimationFrame(loop);
 
     return () => {
@@ -228,7 +267,7 @@ const GameCanvas = () => {
       canvas.removeEventListener('mouseup', onMouseUp);
       canvas.removeEventListener('contextmenu', onContextMenu);
     };
-  }, [getMenuButtonBounds, getTeamButtonBounds, getMapButtonBounds, getSliderValue]);
+  }, [getMenuButtonBounds, getTeamButtonBounds, getMapButtonBounds, getSliderBounds, getSliderValue]);
 
   return (
     <canvas
