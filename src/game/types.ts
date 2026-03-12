@@ -10,12 +10,23 @@ export interface Player {
   maxHealth: number;
   ammo: number;
   maxAmmo: number;
+  reserveAmmo: number;
   speed: number;
   radius: number;
   weapon: Weapon;
+  secondaryWeapon: Weapon | null;
+  knife: Weapon;
   alive: boolean;
   reloadTimer: number;
   shootCooldown: number;
+  money: number;
+  shotsFired: number;        // for spray pattern tracking
+  lastShotTime: number;      // for recoil recovery
+  recoilAngle: number;       // accumulated vertical recoil
+  isMoving: boolean;
+  team: 'ct' | 't';
+  inspecting: boolean;
+  inspectTimer: number;
 }
 
 export interface Enemy {
@@ -65,12 +76,15 @@ export interface Wall {
 }
 
 export interface Weapon {
+  id: string;
   name: string;
   damage: number;
   fireRate: number;
   ammo: number;
   maxAmmo: number;
+  reserveAmmo: number;
   spread: number;
+  automatic: boolean;
 }
 
 export interface GameMap {
