@@ -32,6 +32,7 @@ export interface Player {
   isCrouching: boolean;
   isJumping: boolean;
   jumpTimer: number;
+  isScoped: boolean;
 }
 
 export interface Ally {
@@ -48,6 +49,7 @@ export interface Ally {
   alertTimer: number;
   lastKnownEnemyPos: Vec2 | null;
   state: 'patrol' | 'alert' | 'chase';
+  name: string;
 }
 
 export interface Enemy {
@@ -71,6 +73,7 @@ export interface Bullet {
   end: Vec2;
   time: number;
   isEnemy: boolean;
+  isHeadshot?: boolean;
 }
 
 export interface Particle {
@@ -87,6 +90,7 @@ export interface KillFeedEntry {
   victim: string;
   weapon: string;
   time: number;
+  headshot?: boolean;
 }
 
 export interface Wall {
@@ -94,6 +98,7 @@ export interface Wall {
   y: number;
   w: number;
   h: number;
+  jumpable?: boolean;
 }
 
 export interface Weapon {
@@ -115,4 +120,5 @@ export interface GameMap {
   width: number;
   height: number;
   bombSites: { pos: Vec2; label: string; radius: number }[];
+  name: string;
 }
