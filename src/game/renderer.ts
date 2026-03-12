@@ -71,18 +71,6 @@ function createSandTexture(ctx: CanvasRenderingContext2D): CanvasPattern | null 
   return ctx.createPattern(offscreen, 'repeat');
 }
 
-export function render(
-  ctx: CanvasRenderingContext2D,
-  canvas: HTMLCanvasElement,
-  state: GameState
-) {
-  const { player, enemies, bullets, particles, bloodDecals, killFeed, mousePos,
-    roundTime, roundStatus, score, camera, buyMenuOpen, freezeTimer } = state;
-  const map = state.player.team === 't' ? (await import('./map')).gameMap : (await import('./map')).gameMap;
-  // We just use the imported map directly
-}
-
-// Synchronous render function
 export function renderGame(
   ctx: CanvasRenderingContext2D,
   canvas: HTMLCanvasElement,
