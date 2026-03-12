@@ -14,19 +14,40 @@ export interface Player {
   speed: number;
   radius: number;
   weapon: Weapon;
+  primaryWeapon: Weapon | null;
   secondaryWeapon: Weapon | null;
   knife: Weapon;
+  activeSlot: 'primary' | 'secondary' | 'knife';
   alive: boolean;
   reloadTimer: number;
   shootCooldown: number;
   money: number;
-  shotsFired: number;        // for spray pattern tracking
-  lastShotTime: number;      // for recoil recovery
-  recoilAngle: number;       // accumulated vertical recoil
+  shotsFired: number;
+  lastShotTime: number;
+  recoilAngle: number;
   isMoving: boolean;
   team: 'ct' | 't';
   inspecting: boolean;
   inspectTimer: number;
+  isCrouching: boolean;
+  isJumping: boolean;
+  jumpTimer: number;
+}
+
+export interface Ally {
+  id: number;
+  pos: Vec2;
+  angle: number;
+  health: number;
+  maxHealth: number;
+  speed: number;
+  radius: number;
+  alive: boolean;
+  shootCooldown: number;
+  patrolTarget: Vec2;
+  alertTimer: number;
+  lastKnownEnemyPos: Vec2 | null;
+  state: 'patrol' | 'alert' | 'chase';
 }
 
 export interface Enemy {

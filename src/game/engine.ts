@@ -1,11 +1,12 @@
-import { Player, Enemy, Bullet, Particle, KillFeedEntry, Vec2 } from './types';
+import { Player, Enemy, Ally, Bullet, Particle, KillFeedEntry, Vec2 } from './types';
 import { gameMap } from './map';
-import { WEAPONS, weaponDefToWeapon, BUY_CATEGORIES, WeaponDef } from './weapons';
+import { WEAPONS, weaponDefToWeapon, WeaponDef } from './weapons';
 import { distance, circleRectCollision, raycast, hasLineOfSight, randomPointInMap, normalize } from './utils';
 
 export interface GameState {
   player: Player;
   enemies: Enemy[];
+  allies: Ally[];
   bullets: Bullet[];
   particles: Particle[];
   bloodDecals: { pos: Vec2; alpha: number }[];
@@ -15,7 +16,7 @@ export interface GameState {
   mouseDown: boolean;
   camera: Vec2;
   roundTime: number;
-  roundStatus: 'playing' | 'won' | 'dead' | 'freezetime';
+  roundStatus: 'playing' | 'won' | 'lost' | 'freezetime';
   score: { kills: number; deaths: number };
   gamePhase: 'menu' | 'playing';
   hoveredButton: string | null;
@@ -25,12 +26,27 @@ export interface GameState {
   buyMenuSelection: number;
   freezeTimer: number;
   playerTeam: 'ct' | 't';
+  // Round system
+  currentRound: number;
+  maxRounds: number;
+  roundsWon: number;
+  roundsLost: number;
+  matchOver: boolean;
+  roundEndTimer: number;
+  // Settings
+  enemyCount: number;
+  allyCount: number;
 }
+
+const BASE_SPEED = 130; // much slower
+const KNIFE_SPEED_BONUS = 1.15;
+const CROUCH_SPEED_MULT = 0.4;
 
 export function createInitialState(): GameState {
   return {
     player: createPlayer('t'),
     enemies: [],
+    allies: [],
     bullets: [],
     particles: [],
     bloodDecals: [],
@@ -50,29 +66,41 @@ export function createInitialState(): GameState {
     buyMenuSelection: 0,
     freezeTimer: 0,
     playerTeam: 't',
+    currentRound: 0,
+    maxRounds: 5,
+    roundsWon: 0,
+    roundsLost: 0,
+    matchOver: false,
+    roundEndTimer: 0,
+    enemyCount: 5,
+    allyCount: 3,
   };
 }
 
-function createPlayer(team: 'ct' | 't'): Player {
-  const startWeaponId = team === 't' ? 'glock' : 'usp';
-  const wp = WEAPONS[startWeaponId];
+function createPlayer(team: 'ct' | 't', money?: number): Player {
+  const pistolId = team === 't' ? 'glock' : 'usp';
+  const pistolDef = WEAPONS[pistolId];
+  const pistolWp = weaponDefToWeapon(pistolDef);
+  const knifeWp = weaponDefToWeapon(WEAPONS.knife);
   return {
     pos: { ...gameMap.spawnPoints[0] },
     angle: 0,
     health: 100,
     maxHealth: 100,
-    ammo: wp.ammo,
-    maxAmmo: wp.maxAmmo,
-    reserveAmmo: wp.reserveAmmo,
-    speed: 220,
+    ammo: pistolWp.ammo,
+    maxAmmo: pistolWp.maxAmmo,
+    reserveAmmo: pistolWp.reserveAmmo,
+    speed: BASE_SPEED,
     radius: 12,
-    weapon: weaponDefToWeapon(wp),
-    secondaryWeapon: null,
-    knife: weaponDefToWeapon(WEAPONS.knife),
+    weapon: pistolWp,
+    primaryWeapon: null,
+    secondaryWeapon: pistolWp,
+    knife: knifeWp,
+    activeSlot: 'secondary',
     alive: true,
     reloadTimer: 0,
     shootCooldown: 0,
-    money: 800,
+    money: money ?? 800,
     shotsFired: 0,
     lastShotTime: 0,
     recoilAngle: 0,
@@ -80,6 +108,9 @@ function createPlayer(team: 'ct' | 't'): Player {
     team,
     inspecting: false,
     inspectTimer: 0,
+    isCrouching: false,
+    isJumping: false,
+    jumpTimer: 0,
   };
 }
 
@@ -90,7 +121,7 @@ function createEnemy(id: number, pos: Vec2): Enemy {
     angle: Math.random() * Math.PI * 2,
     health: 100,
     maxHealth: 100,
-    speed: 140,
+    speed: 120,
     radius: 12,
     alive: true,
     shootCooldown: 0,
@@ -101,8 +132,27 @@ function createEnemy(id: number, pos: Vec2): Enemy {
   };
 }
 
+function createAlly(id: number, pos: Vec2): Ally {
+  return {
+    id,
+    pos: { ...pos },
+    angle: Math.random() * Math.PI * 2,
+    health: 100,
+    maxHealth: 100,
+    speed: 110,
+    radius: 12,
+    alive: true,
+    shootCooldown: 0,
+    patrolTarget: randomPointInMap(gameMap.width, gameMap.height, gameMap.walls, 12),
+    alertTimer: 0,
+    lastKnownEnemyPos: null,
+    state: 'patrol',
+  };
+}
+
 export function startRound(state: GameState) {
-  state.player = createPlayer(state.playerTeam);
+  const carryMoney = state.currentRound === 0 ? 800 : state.player.money;
+  state.player = createPlayer(state.playerTeam, carryMoney);
   state.bullets = [];
   state.particles = [];
   state.bloodDecals = [];
@@ -110,13 +160,39 @@ export function startRound(state: GameState) {
   state.roundStatus = 'freezetime';
   state.freezeTimer = 5;
   state.enemies = [];
+  state.allies = [];
   state.nextEnemyId = 0;
   state.buyMenuOpen = false;
-  state.player.money = 800;
+  state.roundEndTimer = 0;
+  state.currentRound++;
 
-  for (const spawn of gameMap.enemySpawns) {
-    state.enemies.push(createEnemy(state.nextEnemyId++, spawn));
+  // Spawn enemies
+  for (let i = 0; i < state.enemyCount; i++) {
+    const spawnIdx = i % gameMap.enemySpawns.length;
+    const baseSpawn = gameMap.enemySpawns[spawnIdx];
+    const offset = { x: baseSpawn.x + (Math.random() - 0.5) * 60, y: baseSpawn.y + (Math.random() - 0.5) * 60 };
+    state.enemies.push(createEnemy(state.nextEnemyId++, offset));
   }
+
+  // Spawn allies near player
+  const playerSpawn = gameMap.spawnPoints[0];
+  for (let i = 0; i < state.allyCount; i++) {
+    const offset = {
+      x: playerSpawn.x + 40 + Math.random() * 80,
+      y: playerSpawn.y - 80 + i * 60 + Math.random() * 40,
+    };
+    state.allies.push(createAlly(100 + i, offset));
+  }
+}
+
+export function startNewMatch(state: GameState) {
+  state.currentRound = 0;
+  state.roundsWon = 0;
+  state.roundsLost = 0;
+  state.matchOver = false;
+  state.score = { kills: 0, deaths: 0 };
+  state.killFeed = [];
+  startRound(state);
 }
 
 export function buyWeapon(state: GameState, weaponId: string): boolean {
@@ -130,22 +206,69 @@ export function buyWeapon(state: GameState, weaponId: string): boolean {
 
   if (def.type === 'pistol') {
     state.player.secondaryWeapon = wp;
+    if (state.player.activeSlot === 'secondary') {
+      switchToSlot(state.player, 'secondary');
+    }
   } else if (def.type !== 'knife') {
-    state.player.weapon = wp;
-    state.player.ammo = wp.ammo;
-    state.player.maxAmmo = wp.maxAmmo;
-    state.player.reserveAmmo = wp.reserveAmmo;
+    state.player.primaryWeapon = wp;
+    switchToSlot(state.player, 'primary');
   }
 
-  state.player.shotsFired = 0;
-  state.player.recoilAngle = 0;
   return true;
+}
+
+function switchToSlot(player: Player, slot: 'primary' | 'secondary' | 'knife') {
+  let wp;
+  if (slot === 'primary' && player.primaryWeapon) {
+    wp = player.primaryWeapon;
+  } else if (slot === 'secondary' && player.secondaryWeapon) {
+    wp = player.secondaryWeapon;
+  } else if (slot === 'knife') {
+    wp = player.knife;
+  } else {
+    return;
+  }
+
+  player.activeSlot = slot;
+  player.weapon = wp;
+  player.ammo = wp.ammo;
+  player.maxAmmo = wp.maxAmmo;
+  player.reserveAmmo = wp.reserveAmmo;
+  player.shotsFired = 0;
+  player.recoilAngle = 0;
+  player.reloadTimer = 0;
+  player.shootCooldown = 0.3; // swap delay
+}
+
+export function switchWeaponSlot(player: Player, slot: 'primary' | 'secondary' | 'knife') {
+  // Save current ammo state before switching
+  if (player.activeSlot === 'primary' && player.primaryWeapon) {
+    player.primaryWeapon.ammo = player.ammo;
+    player.primaryWeapon.reserveAmmo = player.reserveAmmo;
+  } else if (player.activeSlot === 'secondary' && player.secondaryWeapon) {
+    player.secondaryWeapon.ammo = player.ammo;
+    player.secondaryWeapon.reserveAmmo = player.reserveAmmo;
+  }
+  switchToSlot(player, slot);
 }
 
 export function update(state: GameState, dt: number) {
   if (state.gamePhase !== 'playing') return;
 
-  // Freeze time
+  // Round end delay
+  if (state.roundEndTimer > 0) {
+    state.roundEndTimer -= dt;
+    updateCamera(state);
+    if (state.roundEndTimer <= 0) {
+      if (state.currentRound >= state.maxRounds || state.roundsWon >= 3 || state.roundsLost >= 3) {
+        state.matchOver = true;
+      } else {
+        startRound(state);
+      }
+    }
+    return;
+  }
+
   if (state.roundStatus === 'freezetime') {
     state.freezeTimer -= dt;
     updateCamera(state);
@@ -159,18 +282,40 @@ export function update(state: GameState, dt: number) {
 
   updatePlayer(state, dt);
   updateEnemies(state, dt);
+  updateAllies(state, dt);
   updateBullets(state, dt);
   updateParticles(state, dt);
   updateBloodDecals(state, dt);
   updateCamera(state);
 
   state.roundTime -= dt;
-  if (state.roundTime <= 0) {
-    state.roundStatus = 'won';
-  }
 
-  if (state.enemies.every(e => !e.alive)) {
+  // Check round end conditions
+  const allEnemiesDead = state.enemies.every(e => !e.alive);
+  const allAlliesDead = !state.player.alive && state.allies.every(a => !a.alive);
+
+  if (allEnemiesDead) {
     state.roundStatus = 'won';
+    state.roundsWon++;
+    state.player.money += 3250;
+    state.roundEndTimer = 3;
+  } else if (allAlliesDead) {
+    state.roundStatus = 'lost';
+    state.roundsLost++;
+    state.player.money += 1400;
+    state.roundEndTimer = 3;
+  } else if (state.roundTime <= 0) {
+    // Time runs out - CTs win (defenders)
+    if (state.playerTeam === 'ct') {
+      state.roundStatus = 'won';
+      state.roundsWon++;
+      state.player.money += 3250;
+    } else {
+      state.roundStatus = 'lost';
+      state.roundsLost++;
+      state.player.money += 1400;
+    }
+    state.roundEndTimer = 3;
   }
 }
 
@@ -179,11 +324,21 @@ function updatePlayer(state: GameState, dt: number) {
   if (!player.alive) return;
   if (state.buyMenuOpen) return;
 
-  // Inspect
   if (player.inspecting) {
     player.inspectTimer -= dt;
     if (player.inspectTimer <= 0) player.inspecting = false;
   }
+
+  // Jump
+  if (player.isJumping) {
+    player.jumpTimer -= dt;
+    if (player.jumpTimer <= 0) {
+      player.isJumping = false;
+    }
+  }
+
+  // Crouch
+  player.isCrouching = keys.has('control') || keys.has('shift');
 
   // Movement
   let dx = 0, dy = 0;
@@ -194,9 +349,10 @@ function updatePlayer(state: GameState, dt: number) {
 
   player.isMoving = dx !== 0 || dy !== 0;
 
-  // Get weapon def for movement speed
   const weaponDef = WEAPONS[player.weapon.id];
-  const moveMultiplier = weaponDef ? weaponDef.movementSpeed : 1;
+  let moveMultiplier = weaponDef ? weaponDef.movementSpeed : 1;
+  if (player.activeSlot === 'knife') moveMultiplier = KNIFE_SPEED_BONUS;
+  if (player.isCrouching) moveMultiplier *= CROUCH_SPEED_MULT;
 
   if (player.isMoving) {
     const dir = normalize({ x: dx, y: dy });
@@ -247,25 +403,28 @@ function updatePlayer(state: GameState, dt: number) {
     return;
   }
 
-  // Reload key
-  if (keys.has('r') && player.ammo < player.maxAmmo && player.reserveAmmo > 0 && state.roundStatus === 'playing') {
+  if (keys.has('r') && player.ammo < player.maxAmmo && player.reserveAmmo > 0 && player.weapon.id !== 'knife') {
     const reloadTime = weaponDef ? weaponDef.reloadTime : 2;
     player.reloadTimer = reloadTime;
   }
 
   // Shoot
   player.shootCooldown -= dt;
-  const canShoot = weaponDef?.automatic ? state.mouseDown : state.mouseDown;
-  if (canShoot && player.shootCooldown <= 0 && player.ammo > 0 && player.weapon.id !== 'knife') {
-    playerShoot(state);
+
+  if (player.weapon.id === 'knife') {
+    if (state.mouseDown && player.shootCooldown <= 0) {
+      knifeAttack(state);
+    }
+  } else {
+    // Only fire if automatic OR fresh click
+    if (state.mouseDown && player.shootCooldown <= 0 && player.ammo > 0) {
+      if (weaponDef?.automatic || player.shotsFired === 0 || timeSinceShot < weaponDef.fireRate * 1.5) {
+        playerShoot(state);
+      }
+    }
   }
 
-  // Knife attack
-  if (state.mouseDown && player.shootCooldown <= 0 && player.weapon.id === 'knife') {
-    knifeAttack(state);
-  }
-
-  // Auto reload on empty
+  // Auto reload
   if (player.ammo <= 0 && player.reloadTimer <= 0 && player.reserveAmmo > 0 && player.weapon.id !== 'knife') {
     const reloadTime = weaponDef ? weaponDef.reloadTime : 2;
     player.reloadTimer = reloadTime;
@@ -276,27 +435,25 @@ function knifeAttack(state: GameState) {
   const { player } = state;
   player.shootCooldown = 0.5;
 
-  // Check enemies in range
   for (const enemy of state.enemies) {
     if (!enemy.alive) continue;
     const dist = distance(player.pos, enemy.pos);
     if (dist < 60) {
-      // Check if facing enemy
       const angleToEnemy = Math.atan2(enemy.pos.y - player.pos.y, enemy.pos.x - player.pos.x);
-      const angleDiff = Math.abs(player.angle - angleToEnemy);
-      if (angleDiff < Math.PI / 3 || angleDiff > Math.PI * 5 / 3) {
-        // Check if backstab
-        const enemyFacing = Math.atan2(Math.sin(enemy.angle), Math.cos(enemy.angle));
+      let angleDiff = Math.abs(player.angle - angleToEnemy);
+      if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
+      if (angleDiff < Math.PI / 3) {
+        const enemyFacing = enemy.angle;
         const attackDir = Math.atan2(player.pos.y - enemy.pos.y, player.pos.x - enemy.pos.x);
-        const backDiff = Math.abs(enemyFacing - attackDir);
-        const isBackstab = backDiff < Math.PI / 2 || backDiff > Math.PI * 3 / 2;
+        let backDiff = Math.abs(enemyFacing - attackDir);
+        if (backDiff > Math.PI) backDiff = Math.PI * 2 - backDiff;
+        const isBackstab = backDiff < Math.PI / 2;
 
         enemy.health -= isBackstab ? 180 : 40;
         enemy.state = 'chase';
         enemy.lastKnownPlayerPos = { ...player.pos };
         enemy.alertTimer = 5;
 
-        // Blood
         for (let i = 0; i < 5; i++) {
           state.particles.push({
             pos: { ...enemy.pos },
@@ -325,11 +482,11 @@ function playerShoot(state: GameState) {
   player.shootCooldown = weaponDef.fireRate;
   player.inspecting = false;
 
-  // Calculate spread with movement and spray
   let totalSpread = weaponDef.spread;
   if (player.isMoving) totalSpread += weaponDef.movementSpread;
+  if (player.isCrouching) totalSpread *= 0.6;
+  if (player.isJumping) totalSpread *= 3.5;
 
-  // Spray pattern recoil
   const shotIndex = Math.min(player.shotsFired, weaponDef.recoilPattern.length - 1);
   const verticalRecoil = weaponDef.recoilPattern[shotIndex] || 0;
   const horizontalRecoil = (Math.random() - 0.5) * weaponDef.recoilHorizontal * 0.02;
@@ -343,7 +500,6 @@ function playerShoot(state: GameState) {
 
   const result = raycast(player.pos, angle, weaponDef.range, gameMap.walls);
 
-  // Check enemy hits
   let hitEnemy: Enemy | null = null;
   let hitDist = result.dist;
   const endX = player.pos.x + Math.cos(angle) * weaponDef.range;
@@ -364,10 +520,7 @@ function playerShoot(state: GameState) {
       const t = (-b - disc) / (2 * a);
       if (t >= 0 && t <= 1) {
         const d = t * Math.sqrt(a);
-        if (d < hitDist) {
-          hitDist = d;
-          hitEnemy = enemy;
-        }
+        if (d < hitDist) { hitDist = d; hitEnemy = enemy; }
       }
     }
   }
@@ -378,7 +531,6 @@ function playerShoot(state: GameState) {
 
   state.bullets.push({ start: { ...player.pos }, end: bulletEnd, time: 0, isEnemy: false });
 
-  // Muzzle flash
   for (let i = 0; i < 3; i++) {
     state.particles.push({
       pos: { x: player.pos.x + Math.cos(angle) * 18, y: player.pos.y + Math.sin(angle) * 18 },
@@ -406,7 +558,7 @@ function playerShoot(state: GameState) {
       hitEnemy.alive = false;
       state.killFeed.push({ killer: 'YOU', victim: `ENEMY_${hitEnemy.id}`, weapon: player.weapon.name, time: Date.now() });
       state.score.kills++;
-      state.player.money += weaponDef.killReward;
+      state.player.money += 300;
     }
   } else {
     for (let i = 0; i < 3; i++) {
@@ -423,13 +575,30 @@ function updateEnemies(state: GameState, dt: number) {
   for (const enemy of state.enemies) {
     if (!enemy.alive) continue;
 
-    const canSeePlayer = state.player.alive &&
-      distance(enemy.pos, state.player.pos) < 600 &&
-      hasLineOfSight(enemy.pos, state.player.pos, gameMap.walls);
+    // Check if can see player or any ally
+    let targetEntity: { pos: Vec2, alive: boolean } | null = null;
+    let canSeeTarget = false;
 
-    if (canSeePlayer) {
+    if (state.player.alive) {
+      const canSeePlayer = distance(enemy.pos, state.player.pos) < 600 &&
+        hasLineOfSight(enemy.pos, state.player.pos, gameMap.walls);
+      if (canSeePlayer) { targetEntity = state.player; canSeeTarget = true; }
+    }
+
+    if (!canSeeTarget) {
+      for (const ally of state.allies) {
+        if (!ally.alive) continue;
+        if (distance(enemy.pos, ally.pos) < 500 && hasLineOfSight(enemy.pos, ally.pos, gameMap.walls)) {
+          targetEntity = ally;
+          canSeeTarget = true;
+          break;
+        }
+      }
+    }
+
+    if (canSeeTarget && targetEntity) {
       enemy.state = 'chase';
-      enemy.lastKnownPlayerPos = { ...state.player.pos };
+      enemy.lastKnownPlayerPos = { ...targetEntity.pos };
       enemy.alertTimer = 5;
     }
 
@@ -443,9 +612,9 @@ function updateEnemies(state: GameState, dt: number) {
     let moveSpeed = enemy.speed;
 
     if (enemy.state === 'chase' && enemy.lastKnownPlayerPos) {
-      targetPos = canSeePlayer ? state.player.pos : enemy.lastKnownPlayerPos;
+      targetPos = canSeeTarget && targetEntity ? targetEntity.pos : enemy.lastKnownPlayerPos;
       const dist = distance(enemy.pos, targetPos);
-      if (dist < 150 && canSeePlayer) moveSpeed = 0;
+      if (dist < 150 && canSeeTarget) moveSpeed = 0;
     } else {
       targetPos = enemy.patrolTarget;
       moveSpeed = enemy.speed * 0.5;
@@ -467,48 +636,178 @@ function updateEnemies(state: GameState, dt: number) {
       if (canY) enemy.pos.y = newY;
     }
 
-    if (canSeePlayer) {
-      enemy.angle = Math.atan2(state.player.pos.y - enemy.pos.y, state.player.pos.x - enemy.pos.x);
+    if (canSeeTarget && targetEntity) {
+      enemy.angle = Math.atan2(targetEntity.pos.y - enemy.pos.y, targetEntity.pos.x - enemy.pos.x);
     } else {
       enemy.angle = Math.atan2(targetPos.y - enemy.pos.y, targetPos.x - enemy.pos.x);
     }
 
     enemy.shootCooldown -= dt;
-    if (canSeePlayer && enemy.shootCooldown <= 0) {
-      enemyShoot(state, enemy);
+    if (canSeeTarget && targetEntity && enemy.shootCooldown <= 0) {
+      enemyShoot(state, enemy, targetEntity.pos);
     }
   }
 }
 
-function enemyShoot(state: GameState, enemy: Enemy) {
+function updateAllies(state: GameState, dt: number) {
+  for (const ally of state.allies) {
+    if (!ally.alive) continue;
+
+    // Find nearest visible enemy
+    let targetEnemy: Enemy | null = null;
+    let canSeeEnemy = false;
+
+    for (const enemy of state.enemies) {
+      if (!enemy.alive) continue;
+      if (distance(ally.pos, enemy.pos) < 500 && hasLineOfSight(ally.pos, enemy.pos, gameMap.walls)) {
+        targetEnemy = enemy;
+        canSeeEnemy = true;
+        break;
+      }
+    }
+
+    if (canSeeEnemy && targetEnemy) {
+      ally.state = 'chase';
+      ally.lastKnownEnemyPos = { ...targetEnemy.pos };
+      ally.alertTimer = 5;
+    }
+
+    ally.alertTimer -= dt;
+    if (ally.alertTimer <= 0 && ally.state !== 'patrol') {
+      ally.state = 'patrol';
+      // Follow player loosely
+      ally.patrolTarget = {
+        x: state.player.pos.x + (Math.random() - 0.5) * 200,
+        y: state.player.pos.y + (Math.random() - 0.5) * 200,
+      };
+    }
+
+    let targetPos: Vec2;
+    let moveSpeed = ally.speed;
+
+    if (ally.state === 'chase' && ally.lastKnownEnemyPos) {
+      targetPos = canSeeEnemy && targetEnemy ? targetEnemy.pos : ally.lastKnownEnemyPos;
+      const dist = distance(ally.pos, targetPos);
+      if (dist < 160 && canSeeEnemy) moveSpeed = 0;
+    } else {
+      targetPos = ally.patrolTarget;
+      moveSpeed = ally.speed * 0.6;
+      if (distance(ally.pos, ally.patrolTarget) < 40) {
+        ally.patrolTarget = {
+          x: state.player.pos.x + (Math.random() - 0.5) * 200,
+          y: state.player.pos.y + (Math.random() - 0.5) * 200,
+        };
+      }
+    }
+
+    if (moveSpeed > 0) {
+      const dir = normalize({ x: targetPos.x - ally.pos.x, y: targetPos.y - ally.pos.y });
+      const newX = ally.pos.x + dir.x * moveSpeed * dt;
+      const newY = ally.pos.y + dir.y * moveSpeed * dt;
+      let canX = true, canY = true;
+      for (const wall of gameMap.walls) {
+        if (circleRectCollision(newX, ally.pos.y, ally.radius, wall.x, wall.y, wall.w, wall.h)) canX = false;
+        if (circleRectCollision(ally.pos.x, newY, ally.radius, wall.x, wall.y, wall.w, wall.h)) canY = false;
+      }
+      if (canX) ally.pos.x = newX;
+      if (canY) ally.pos.y = newY;
+    }
+
+    if (canSeeEnemy && targetEnemy) {
+      ally.angle = Math.atan2(targetEnemy.pos.y - ally.pos.y, targetEnemy.pos.x - ally.pos.x);
+    } else {
+      ally.angle = Math.atan2(targetPos.y - ally.pos.y, targetPos.x - ally.pos.x);
+    }
+
+    ally.shootCooldown -= dt;
+    if (canSeeEnemy && targetEnemy && ally.shootCooldown <= 0) {
+      allyShoot(state, ally, targetEnemy);
+    }
+  }
+}
+
+function allyShoot(state: GameState, ally: Ally, target: Enemy) {
+  ally.shootCooldown = 0.35 + Math.random() * 0.25;
+  const spread = (Math.random() - 0.5) * 0.1;
+  const angle = ally.angle + spread;
+  const result = raycast(ally.pos, angle, 800, gameMap.walls);
+
+  let hitDist = result.dist;
+  let hitTarget = false;
+
+  const dx2 = Math.cos(angle) * 800;
+  const dy2 = Math.sin(angle) * 800;
+  const fx = ally.pos.x - target.pos.x;
+  const fy = ally.pos.y - target.pos.y;
+  const a = dx2 * dx2 + dy2 * dy2;
+  const b2 = 2 * (fx * dx2 + fy * dy2);
+  const c = fx * fx + fy * fy - target.radius * target.radius;
+  let disc = b2 * b2 - 4 * a * c;
+  if (disc >= 0) {
+    disc = Math.sqrt(disc);
+    const t = (-b2 - disc) / (2 * a);
+    if (t >= 0 && t <= 1) {
+      const d = t * Math.sqrt(a);
+      if (d < hitDist) { hitDist = d; hitTarget = true; }
+    }
+  }
+
+  const bulletEnd = hitTarget
+    ? { x: ally.pos.x + Math.cos(angle) * hitDist, y: ally.pos.y + Math.sin(angle) * hitDist }
+    : result.hit;
+
+  state.bullets.push({ start: { ...ally.pos }, end: bulletEnd, time: 0, isEnemy: false });
+
+  for (let i = 0; i < 2; i++) {
+    state.particles.push({
+      pos: { x: ally.pos.x + Math.cos(angle) * 16, y: ally.pos.y + Math.sin(angle) * 16 },
+      vel: { x: Math.cos(angle + (Math.random() - 0.5)) * 150, y: Math.sin(angle + (Math.random() - 0.5)) * 150 },
+      life: 0, maxLife: 0.06, color: 'hsl(45, 100%, 70%)', size: 3,
+    });
+  }
+
+  if (hitTarget) {
+    target.health -= 25;
+    for (let i = 0; i < 4; i++) {
+      state.particles.push({
+        pos: { ...bulletEnd },
+        vel: { x: (Math.random() - 0.5) * 120, y: (Math.random() - 0.5) * 120 },
+        life: 0, maxLife: 0.25, color: 'hsl(0, 70%, 60%)', size: 3,
+      });
+    }
+    state.bloodDecals.push({ pos: { ...bulletEnd }, alpha: 1 });
+
+    if (target.health <= 0) {
+      target.alive = false;
+      state.killFeed.push({ killer: `ALLY_${ally.id}`, victim: `ENEMY_${target.id}`, weapon: 'AK-47', time: Date.now() });
+    }
+  }
+}
+
+function enemyShoot(state: GameState, enemy: Enemy, targetPos: Vec2) {
   enemy.shootCooldown = 0.4 + Math.random() * 0.3;
   const spread = (Math.random() - 0.5) * 0.12;
   const angle = enemy.angle + spread;
   const result = raycast(enemy.pos, angle, 800, gameMap.walls);
 
-  let hitPlayer = false;
+  // Check hits on player and allies
+  let hitEntity: 'player' | number | null = null;
   let hitDist = result.dist;
 
+  // Check player
   if (state.player.alive) {
-    const dx2 = Math.cos(angle) * 800;
-    const dy2 = Math.sin(angle) * 800;
-    const fx = enemy.pos.x - state.player.pos.x;
-    const fy = enemy.pos.y - state.player.pos.y;
-    const a = dx2 * dx2 + dy2 * dy2;
-    const b2 = 2 * (fx * dx2 + fy * dy2);
-    const c = fx * fx + fy * fy - state.player.radius * state.player.radius;
-    let disc = b2 * b2 - 4 * a * c;
-    if (disc >= 0) {
-      disc = Math.sqrt(disc);
-      const t = (-b2 - disc) / (2 * a);
-      if (t >= 0 && t <= 1) {
-        const d = t * Math.sqrt(a);
-        if (d < hitDist) { hitDist = d; hitPlayer = true; }
-      }
-    }
+    const hd = checkHit(enemy.pos, angle, state.player.pos, state.player.radius, hitDist);
+    if (hd !== null) { hitDist = hd; hitEntity = 'player'; }
   }
 
-  const bulletEnd = hitPlayer
+  // Check allies
+  for (const ally of state.allies) {
+    if (!ally.alive) continue;
+    const hd = checkHit(enemy.pos, angle, ally.pos, ally.radius, hitDist);
+    if (hd !== null) { hitDist = hd; hitEntity = ally.id; }
+  }
+
+  const bulletEnd = hitEntity !== null
     ? { x: enemy.pos.x + Math.cos(angle) * hitDist, y: enemy.pos.y + Math.sin(angle) * hitDist }
     : result.hit;
 
@@ -522,24 +821,56 @@ function enemyShoot(state: GameState, enemy: Enemy) {
     });
   }
 
-  if (hitPlayer) {
-    state.player.health -= 15;
-    for (let i = 0; i < 4; i++) {
-      state.particles.push({
-        pos: { ...bulletEnd },
-        vel: { x: (Math.random() - 0.5) * 120, y: (Math.random() - 0.5) * 120 },
-        life: 0, maxLife: 0.25, color: 'hsl(0, 70%, 60%)', size: 3,
-      });
-    }
-    state.bloodDecals.push({ pos: { ...bulletEnd }, alpha: 1 });
-
+  if (hitEntity === 'player') {
+    state.player.health -= 18;
+    spawnBloodParticles(state, bulletEnd);
     if (state.player.health <= 0) {
       state.player.alive = false;
-      state.roundStatus = 'dead';
       state.score.deaths++;
       state.killFeed.push({ killer: `ENEMY_${enemy.id}`, victim: 'YOU', weapon: 'AK-47', time: Date.now() });
     }
+  } else if (typeof hitEntity === 'number') {
+    const ally = state.allies.find(a => a.id === hitEntity);
+    if (ally) {
+      ally.health -= 18;
+      spawnBloodParticles(state, bulletEnd);
+      if (ally.health <= 0) {
+        ally.alive = false;
+        state.killFeed.push({ killer: `ENEMY_${enemy.id}`, victim: `ALLY_${ally.id}`, weapon: 'AK-47', time: Date.now() });
+      }
+    }
   }
+}
+
+function checkHit(origin: Vec2, angle: number, target: Vec2, radius: number, maxDist: number): number | null {
+  const dx2 = Math.cos(angle) * 800;
+  const dy2 = Math.sin(angle) * 800;
+  const fx = origin.x - target.x;
+  const fy = origin.y - target.y;
+  const a = dx2 * dx2 + dy2 * dy2;
+  const b2 = 2 * (fx * dx2 + fy * dy2);
+  const c = fx * fx + fy * fy - radius * radius;
+  let disc = b2 * b2 - 4 * a * c;
+  if (disc >= 0) {
+    disc = Math.sqrt(disc);
+    const t = (-b2 - disc) / (2 * a);
+    if (t >= 0 && t <= 1) {
+      const d = t * Math.sqrt(a);
+      if (d < maxDist) return d;
+    }
+  }
+  return null;
+}
+
+function spawnBloodParticles(state: GameState, pos: Vec2) {
+  for (let i = 0; i < 4; i++) {
+    state.particles.push({
+      pos: { ...pos },
+      vel: { x: (Math.random() - 0.5) * 120, y: (Math.random() - 0.5) * 120 },
+      life: 0, maxLife: 0.25, color: 'hsl(0, 70%, 60%)', size: 3,
+    });
+  }
+  state.bloodDecals.push({ pos: { ...pos }, alpha: 1 });
 }
 
 function updateBullets(state: GameState, dt: number) {
