@@ -48,7 +48,7 @@ export const dust2Map: GameMap = {
   width: MAP_WIDTH,
   height: MAP_HEIGHT,
   groundTexture: 'dust',
-  spawnPoints: [{ x: 400, y: 1000 }], // FIXED: Open area T Spawn
+  spawnPoints: [{ x: 300, y: 900 }], // FIXED: Open area T Spawn
   enemySpawns: [
     { x: 2800, y: 500 },
     { x: 2800, y: 700 },
