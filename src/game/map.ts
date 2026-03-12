@@ -1,28 +1,62 @@
 import { GameMap, Wall, Vec2 } from './types';
 
-export const MAP_WIDTH = 3000;
-export const MAP_HEIGHT = 2200;
+export const MAP_WIDTH = 3200;
+export const MAP_HEIGHT = 2400;
+
+// Original style textures
+export function createConcreteTexture(ctx: CanvasRenderingContext2D, width: number, height: number): CanvasPattern {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const c = canvas.getContext('2d')!;
+  
+  c.fillStyle = '#5A5E6B';
+  c.fillRect(0, 0, 64, 64);
+  
+  for (let i = 0; i < 200; i++) {
+    c.fillStyle = `hsl(220, 10%, ${55 + Math.random() * 20}%)`;
+    c.fillRect(Math.floor(Math.random() * 64), Math.floor(Math.random() * 64), 1, 1);
+  }
+  
+  return ctx.createPattern(canvas, 'repeat')!;
+}
+
+export function createDustTexture(ctx: CanvasRenderingContext2D): CanvasPattern {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const c = canvas.getContext('2d')!;
+  
+  c.fillStyle = '#C6A97A';
+  c.fillRect(0, 0, 64, 64);
+  
+  for (let i = 0; i < 200; i++) {
+    c.fillStyle = `hsl(38, 35%, ${50 + Math.random() * 30}%)`;
+    c.fillRect(Math.floor(Math.random() * 64), Math.floor(Math.random() * 64), 1, 1);
+  }
+  
+  return ctx.createPattern(canvas, 'repeat')!;
+}
 
 export function w(x: number, y: number, width: number, height: number, jumpable = false): Wall {
   return { x, y, w: width, h: height, jumpable };
 }
 
-// === DUST II - ACTUALLY PLAYABLE ===
+// === DUST II - ORIGINAL STYLE, FIXED SPAWNS ===
 export const dust2Map: GameMap = {
   name: 'DUST II',
   width: MAP_WIDTH,
   height: MAP_HEIGHT,
   groundTexture: 'dust',
-  // FIXED: Spawn in open area, not in walls
-  spawnPoints: [{ x: 300, y: 900 }],
+  spawnPoints: [{ x: 400, y: 1000 }], // FIXED: Open area T Spawn
   enemySpawns: [
-    { x: 2600, y: 500 },
-    { x: 2600, y: 700 },
-    { x: 2600, y: 900 },
+    { x: 2800, y: 500 },
+    { x: 2800, y: 700 },
+    { x: 2800, y: 900 },
   ],
   bombSites: [
-    { pos: { x: 2500, y: 500 }, label: 'A', radius: 150 },
-    { pos: { x: 1800, y: 1700 }, label: 'B', radius: 150 },
+    { pos: { x: 2700, y: 450 }, label: 'A', radius: 160 },
+    { pos: { x: 2000, y: 1900 }, label: 'B', radius: 160 },
   ],
   walls: [
     // Boundaries
@@ -32,76 +66,91 @@ export const dust2Map: GameMap = {
     w(MAP_WIDTH - 20, 0, 20, MAP_HEIGHT),
 
     // T Spawn - FIXED: Open area, not boxing player in
-    w(20, 500, 200, 20),
-    w(20, 1300, 200, 20),
-    w(200, 500, 20, 400),
-    w(200, 1000, 20, 300),
+    w(20, 600, 380, 20),
+    w(20, 1400, 380, 20),
+    w(400, 600, 20, 400),
+    w(400, 1100, 20, 300),
 
-    // Long A - FIXED: Proper corridors
-    w(220, 200, 1200, 20),
-    w(220, 500, 1200, 20),
-    w(220, 200, 20, 300),
-    w(1420, 200, 20, 300),
+    // Long A
+    w(420, 200, 1400, 20),
+    w(420, 500, 1400, 20),
+    w(420, 200, 20, 300),
+    w(1820, 200, 20, 300),
     
-    // A Site - FIXED: Open bombsite
-    w(1420, 200, 1200, 20),
-    w(2620, 200, 20, 400),
-    w(1420, 200, 20, 400),
-    w(1420, 600, 1200, 20),
-    
-    // A boxes (cover only, not blocking)
-    w(1800, 300, 60, 40, true),
-    w(2200, 400, 60, 40, true),
+    // Long doors - jumpable boxes
+    w(900, 250, 80, 60, true),
+    w(1300, 350, 60, 40, true),
 
-    // Mid - FIXED: Proper connections
-    w(220, 700, 20, 400),
-    w(220, 1100, 500, 20),
-    w(720, 700, 20, 400),
+    // A Site
+    w(1840, 200, 1000, 20),
+    w(2740, 200, 20, 400),
+    w(1840, 200, 20, 400),
+    w(1840, 600, 920, 20),
     
-    // Mid boxes
-    w(400, 800, 60, 40, true),
-    w(500, 900, 60, 40, true),
+    // A boxes - jumpable
+    w(2200, 300, 80, 40, true),
+    w(2500, 400, 60, 40, true),
+    w(2000, 450, 70, 40, true),
 
-    // B tunnels - FIXED: Open path
-    w(220, 1400, 20, 400),
-    w(220, 1800, 500, 20),
-    w(720, 1400, 20, 400),
-    
-    // B Site - FIXED: Open bombsite
-    w(720, 1400, 20, 500),
-    w(720, 1900, 1200, 20),
-    w(1920, 1400, 20, 500),
-    w(720, 1400, 1200, 20),
-    
-    // B boxes
-    w(1000, 1600, 60, 40, true),
-    w(1400, 1700, 60, 40, true),
+    // Catwalk
+    w(1400, 600, 20, 300),
+    w(1400, 900, 400, 20),
+    w(1800, 600, 20, 300),
 
-    // CT Spawn - FIXED: Open area
-    w(2620, 400, 360, 20),
-    w(2620, 900, 360, 20),
-    w(2980, 400, 20, 500),
+    // Mid
+    w(420, 800, 20, 400),
+    w(420, 1200, 500, 20),
+    w(920, 800, 20, 400),
     
-    // CT boxes
-    w(2800, 500, 60, 40, true),
+    // Mid boxes - jumpable
+    w(600, 900, 80, 40, true),
+    w(1100, 1000, 80, 40, true),
+
+    // B tunnels
+    w(420, 1500, 20, 400),
+    w(420, 1900, 500, 20),
+    w(920, 1500, 20, 400),
+    
+    // Tunnel boxes - jumpable
+    w(600, 1700, 60, 40, true),
+
+    // B Site
+    w(920, 1500, 20, 600),
+    w(920, 2100, 1200, 20),
+    w(2120, 1500, 20, 600),
+    w(920, 1500, 1200, 20),
+    
+    // B boxes - jumpable
+    w(1200, 1700, 80, 40, true),
+    w(1600, 1800, 60, 40, true),
+    w(1900, 1900, 70, 40, true),
+
+    // CT Spawn
+    w(2740, 500, 440, 20),
+    w(2740, 1000, 440, 20),
+    w(3180, 500, 20, 500),
+    
+    // CT boxes - jumpable
+    w(2900, 600, 60, 40, true),
+    w(3000, 800, 60, 40, true),
   ],
 };
 
-// === MIRAGE - ACTUALLY PLAYABLE ===
+// === MIRAGE - ORIGINAL STYLE, FIXED SPAWNS ===
 export const mirageMap: GameMap = {
   name: 'MIRAGE',
   width: MAP_WIDTH,
   height: MAP_HEIGHT,
   groundTexture: 'concrete',
-  spawnPoints: [{ x: 300, y: 900 }],
+  spawnPoints: [{ x: 400, y: 1000 }],
   enemySpawns: [
-    { x: 2600, y: 500 },
-    { x: 2600, y: 700 },
-    { x: 2600, y: 900 },
+    { x: 2800, y: 500 },
+    { x: 2800, y: 700 },
+    { x: 2800, y: 900 },
   ],
   bombSites: [
-    { pos: { x: 2500, y: 500 }, label: 'A', radius: 150 },
-    { pos: { x: 1600, y: 1600 }, label: 'B', radius: 150 },
+    { pos: { x: 2700, y: 450 }, label: 'A', radius: 160 },
+    { pos: { x: 1800, y: 1800 }, label: 'B', radius: 160 },
   ],
   walls: [
     w(0, 0, MAP_WIDTH, 20),
@@ -110,56 +159,57 @@ export const mirageMap: GameMap = {
     w(MAP_WIDTH - 20, 0, 20, MAP_HEIGHT),
 
     // T Spawn - FIXED: Open
-    w(20, 500, 200, 20),
-    w(20, 1300, 200, 20),
-    w(200, 500, 20, 400),
-    w(200, 1000, 20, 300),
+    w(20, 600, 380, 20),
+    w(20, 1400, 380, 20),
+    w(400, 600, 20, 400),
+    w(400, 1100, 20, 300),
 
-    // Palace/A ramp - FIXED: Open path
-    w(220, 200, 20, 300),
-    w(220, 200, 900, 20),
-    w(1120, 200, 20, 300),
+    // Palace/A ramp
+    w(420, 200, 20, 300),
+    w(420, 200, 900, 20),
+    w(1320, 200, 20, 300),
 
-    // A site - FIXED: Open
-    w(1120, 200, 20, 400),
-    w(2620, 200, 20, 400),
-    w(1120, 200, 1500, 20),
-    w(1120, 600, 1500, 20),
+    // A site
+    w(1340, 200, 20, 400),
+    w(2740, 200, 20, 400),
+    w(1340, 200, 1400, 20),
+    w(1340, 600, 1400, 20),
     
-    // A boxes
-    w(1600, 300, 60, 40, true),
-    w(2000, 400, 60, 40, true),
+    // A boxes - jumpable
+    w(1800, 300, 80, 40, true),
+    w(2200, 350, 60, 40, true),
+    w(2500, 400, 70, 40, true),
 
-    // Mid - FIXED: Open
-    w(220, 700, 20, 400),
-    w(220, 1100, 600, 20),
-    w(820, 700, 20, 400),
+    // Mid
+    w(420, 800, 20, 400),
+    w(420, 1200, 600, 20),
+    w(1020, 800, 20, 400),
 
     // Connector
-    w(1120, 700, 20, 300),
-    w(1120, 700, 400, 20),
+    w(1340, 800, 20, 300),
+    w(1340, 800, 400, 20),
 
-    // B apps - FIXED: Open
-    w(220, 1400, 20, 400),
-    w(220, 1800, 500, 20),
-    w(720, 1400, 20, 400),
+    // B apps
+    w(420, 1500, 20, 400),
+    w(420, 1900, 500, 20),
+    w(920, 1500, 20, 400),
 
-    // B site - FIXED: Open
-    w(720, 1400, 20, 500),
-    w(720, 1900, 1000, 20),
-    w(1720, 1400, 20, 500),
-    w(720, 1400, 1000, 20),
+    // B site
+    w(940, 1500, 20, 500),
+    w(940, 2000, 1000, 20),
+    w(1940, 1500, 20, 500),
+    w(940, 1500, 1000, 20),
     
-    // B boxes
-    w(1000, 1600, 60, 40, true),
+    // B boxes - jumpable
+    w(1200, 1600, 80, 40, true),
 
-    // CT spawn - FIXED: Open
-    w(2620, 400, 360, 20),
-    w(2620, 900, 360, 20),
-    w(2980, 400, 20, 500),
+    // CT spawn
+    w(2740, 500, 440, 20),
+    w(2740, 1000, 440, 20),
+    w(3180, 500, 20, 500),
     
-    // CT boxes
-    w(2800, 500, 60, 40, true),
+    // CT boxes - jumpable
+    w(2900, 600, 60, 40, true),
   ],
 };
 
