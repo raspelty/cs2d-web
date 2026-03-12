@@ -4,27 +4,29 @@ import { MAPS } from './map';
 import { WEAPONS, BUY_CATEGORIES } from './weapons';
 import { GameState } from './engine';
 import { hasLineOfSight, distance } from './utils';
+import { createConcreteTexture, createDustTexture } from './map';
 
 const COLORS = {
-  background: '#1A1F2E',
+  background: '#0A0F1A',
   foreground: '#E0E5F0',
-  sand: '#C6A97A',
-  concrete: '#6B7280',
-  metal: '#8B95A9',
-  wood: '#8B5A2B',
-  wall: '#4A4F5E',
-  wallTop: '#6B7280',
-  ctColor: '#4B9EFF',
+  ctColor: '#6B9EFF',
   tColor: '#FFB84B',
   enemy: '#FF6B6B',
-  allyColor: '#4BFF4B',
-  healthBar: '#4BFF4B',
+  allyColor: '#6BFF6B',
+  healthBar: '#6BFF6B',
   healthBarBg: 'rgba(0,0,0,0.5)',
-  crosshair: 'rgba(255,255,255,0.8)',
   money: '#FFD700',
 };
 
 const FOV_HALF_ANGLE = Math.PI / 4;
+
+let concreteTexture: CanvasPattern | null = null;
+let dustTexture: CanvasPattern | null = null;
+
+function initTextures(ctx: CanvasRenderingContext2D) {
+  if (!concreteTexture) concreteTexture = createConcreteTexture(ctx);
+  if (!dustTexture) dustTexture = createDustTexture(ctx);
+}
 
 function isInFOV(player: Player, targetPos: Vec2, walls: Wall[]): boolean {
   if (!player.alive) return true;
@@ -55,13 +57,17 @@ export function renderGame(
   const w = canvas.width;
   const h = canvas.height;
 
-  // Clear with solid color (fastest)
-  ctx.fillStyle = '#0A0F1A';
+  initTextures(ctx);
+
+  // Sky gradient
+  const gradient = ctx.createLinearGradient(0, 0, 0, h);
+  gradient.addColorStop(0, '#1A2639');
+  gradient.addColorStop(1, '#2A3A4A');
+  ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, w, h);
 
   ctx.save();
   
-  // Scope zoom
   if (player.isScoped && player.alive) {
     const cx = w / 2, cy = h / 2;
     ctx.translate(cx, cy);
@@ -71,11 +77,12 @@ export function renderGame(
 
   ctx.translate(-camera.x, -camera.y);
 
-  // Ground - solid color (fast)
-  ctx.fillStyle = map.groundTexture === 'dust' ? COLORS.sand : COLORS.concrete;
+  // Ground
+  ctx.fillStyle = map.groundTexture === 'dust' && dustTexture ? dustTexture : 
+                  concreteTexture ? concreteTexture : '#5A5E6B';
   ctx.fillRect(0, 0, map.width, map.height);
 
-  // Bomb sites (simple circles)
+  // Bomb sites
   for (const site of map.bombSites) {
     ctx.fillStyle = 'rgba(200, 50, 50, 0.15)';
     ctx.beginPath();
@@ -92,32 +99,32 @@ export function renderGame(
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(site.label, site.pos.x, site.pos.y);
-    
     ctx.setLineDash([]);
   }
 
-  // Walls (simple fill, no textures for speed)
+  // Walls
   for (const wall of map.walls) {
-    ctx.fillStyle = wall.jumpable ? '#8B7355' : COLORS.wall;
+    // Shadow
+    ctx.shadowColor = 'rgba(0,0,0,0.3)';
+    ctx.shadowBlur = 5;
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 2;
+    
+    ctx.fillStyle = wall.jumpable ? '#8B7355' : '#4A4F5E';
     ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
     
-    // Simple edge highlight
-    ctx.strokeStyle = wall.jumpable ? '#FFD700' : COLORS.wallTop;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(wall.x, wall.y, wall.w, wall.h);
-  }
-
-  // Props (simple)
-  if (map.props) {
-    for (const prop of map.props) {
-      ctx.fillStyle = prop.type === 'box' ? COLORS.wood : '#CC5500';
-      ctx.fillRect(prop.pos.x - prop.width/2, prop.pos.y - prop.height/2, prop.width, prop.height);
-      
-      if (prop.type === 'barrel') {
-        ctx.strokeStyle = '#8B4513';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(prop.pos.x - prop.width/2, prop.pos.y - prop.height/2, prop.width, prop.height);
-      }
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    
+    if (wall.jumpable) {
+      ctx.strokeStyle = '#FFD700';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(wall.x, wall.y, wall.w, wall.h);
+    } else {
+      ctx.strokeStyle = '#6B7280';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(wall.x, wall.y, wall.w, wall.h);
     }
   }
 
@@ -140,18 +147,6 @@ export function renderGame(
     ctx.stroke();
   }
 
-  // Hit markers
-  for (const hit of hitMarkers) {
-    const age = (Date.now() - hit.time) / 500;
-    if (age > 1) continue;
-    const alpha = 1 - age;
-    ctx.strokeStyle = hit.headshot ? `rgba(255, 100, 100, ${alpha})` : `rgba(255, 255, 255, ${alpha})`;
-    ctx.lineWidth = hit.headshot ? 2 : 1;
-    ctx.beginPath();
-    ctx.arc(hit.pos.x, hit.pos.y, 8 * (1 - age), 0, Math.PI * 2);
-    ctx.stroke();
-  }
-
   // Particles
   for (const p of particles) {
     const alpha = 1 - p.life / p.maxLife;
@@ -166,64 +161,58 @@ export function renderGame(
     if (!ally.alive) continue;
     
     ctx.fillStyle = COLORS.allyColor;
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = 'rgba(255,255,255,0.3)';
     ctx.beginPath();
     ctx.arc(ally.pos.x, ally.pos.y, ally.radius, 0, Math.PI * 2);
     ctx.fill();
     
-    // Health bar
-    const bw = 20, bh = 2, bx = ally.pos.x - bw/2, by = ally.pos.y + ally.radius + 4;
-    ctx.fillStyle = COLORS.healthBarBg;
-    ctx.fillRect(bx, by, bw, bh);
-    ctx.fillStyle = COLORS.healthBar;
-    ctx.fillRect(bx, by, bw * (ally.health / ally.maxHealth), bh);
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(ally.pos.x, ally.pos.y);
+    ctx.lineTo(ally.pos.x + Math.cos(ally.angle) * 15, ally.pos.y + Math.sin(ally.angle) * 15);
+    ctx.stroke();
   }
 
-  // Enemies (only in FOV)
+  // Enemies
   const viewEntity = player.alive ? player : null;
   for (const e of enemies) {
     if (!e.alive) continue;
     if (viewEntity && !isInFOV(viewEntity, e.pos, map.walls)) continue;
 
     ctx.fillStyle = COLORS.enemy;
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = 'rgba(255,0,0,0.3)';
     ctx.beginPath();
     ctx.arc(e.pos.x, e.pos.y, e.radius, 0, Math.PI * 2);
     ctx.fill();
-    
-    const bw = 20, bh = 2, bx = e.pos.x - bw/2, by = e.pos.y + e.radius + 4;
-    ctx.fillStyle = COLORS.healthBarBg;
-    ctx.fillRect(bx, by, bw, bh);
-    ctx.fillStyle = COLORS.enemy;
-    ctx.fillRect(bx, by, bw * (e.health / e.maxHealth), bh);
+    ctx.shadowBlur = 0;
   }
 
   // Player
   if (player.alive) {
-    const radius = player.isCrouching ? 10 : 12;
     ctx.fillStyle = player.team === 't' ? COLORS.tColor : COLORS.ctColor;
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'rgba(255,255,255,0.3)';
     ctx.beginPath();
-    ctx.arc(player.pos.x, player.pos.y, radius, 0, Math.PI * 2);
+    ctx.arc(player.pos.x, player.pos.y, player.radius, 0, Math.PI * 2);
     ctx.fill();
     
-    // Aim line
+    ctx.shadowBlur = 0;
     ctx.strokeStyle = '#FFFFFF';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(player.pos.x, player.pos.y);
     ctx.lineTo(player.pos.x + Math.cos(player.angle) * 20, player.pos.y + Math.sin(player.angle) * 20);
     ctx.stroke();
-    
-    // Health bar
-    const bw = 24, bh = 3, bx = player.pos.x - bw/2, by = player.pos.y + radius + 5;
-    ctx.fillStyle = COLORS.healthBarBg;
-    ctx.fillRect(bx, by, bw, bh);
-    ctx.fillStyle = COLORS.healthBar;
-    ctx.fillRect(bx, by, bw * (player.health / player.maxHealth), bh);
   }
 
   ctx.restore();
 
-  // === HUD (keep this, it's light) ===
-  drawHUD(ctx, w, h, state, map);
+  // === CS2 STYLE HUD ===
+  drawCS2HUD(ctx, w, h, state);
 
   // Scope overlay
   if (player.isScoped && player.alive) {
@@ -244,108 +233,147 @@ export function renderGame(
   }
 }
 
-function drawHUD(ctx: CanvasRenderingContext2D, w: number, h: number, state: GameState, map: GameMap) {
-  const { player, mousePos, roundTime, roundStatus, score, killFeed } = state;
+function drawCS2HUD(ctx: CanvasRenderingContext2D, w: number, h: number, state: GameState) {
+  const { player, roundTime, roundStatus, score, killFeed } = state;
 
-  // Simple crosshair (not when scoped)
-  if (!player.isScoped) {
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(mousePos.x - 10, mousePos.y);
-    ctx.lineTo(mousePos.x - 4, mousePos.y);
-    ctx.moveTo(mousePos.x + 4, mousePos.y);
-    ctx.lineTo(mousePos.x + 10, mousePos.y);
-    ctx.moveTo(mousePos.x, mousePos.y - 10);
-    ctx.lineTo(mousePos.x, mousePos.y - 4);
-    ctx.moveTo(mousePos.x, mousePos.y + 4);
-    ctx.lineTo(mousePos.x, mousePos.y + 10);
-    ctx.stroke();
-  }
+  // === TOP BAR ===
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(0, 0, w, 32);
 
-  // Top info
-  ctx.fillStyle = 'rgba(0,0,0,0.5)';
-  ctx.fillRect(w/2 - 60, 5, 120, 25);
-  ctx.fillStyle = 'white';
-  ctx.font = '12px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText(`${state.playerTeam === 't' ? 'T' : 'CT'} ${state.roundsWon}-${state.roundsLost}`, w/2, 22);
-
-  // Timer
+  // Timer - CENTER TOP
   const minutes = Math.floor(Math.max(0, roundTime) / 60);
   const seconds = Math.floor(Math.max(0, roundTime) % 60);
-  ctx.fillStyle = roundTime < 10 ? '#FF6B6B' : 'white';
-  ctx.font = 'bold 16px monospace';
-  ctx.fillText(`${minutes}:${seconds.toString().padStart(2, '0')}`, w/2, 50);
+  ctx.fillStyle = roundTime < 10 ? '#FF6B6B' : '#FFFFFF';
+  ctx.font = 'bold 20px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(`${minutes}:${seconds.toString().padStart(2, '0')}`, w/2, 22);
 
-  // Kill feed
+  // Score - LEFT TOP
+  ctx.fillStyle = state.playerTeam === 't' ? COLORS.tColor : COLORS.ctColor;
+  ctx.font = 'bold 16px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText(`${state.roundsWon}`, 20, 22);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText('-', 45, 22);
+  ctx.fillStyle = state.playerTeam === 't' ? COLORS.ctColor : COLORS.tColor;
+  ctx.fillText(`${state.roundsLost}`, 60, 22);
+
+  // K/D - RIGHT TOP
+  ctx.fillStyle = '#FFFFFF';
+  ctx.textAlign = 'right';
+  ctx.fillText(`${score.kills} / ${score.deaths}`, w - 20, 22);
+
+  // === KILL FEED - TOP RIGHT ===
   const now = Date.now();
-  const visible = killFeed.filter(k => now - k.time < 5000).slice(-4);
+  const visible = killFeed.filter(k => now - k.time < 5000).slice(-5);
   visible.forEach((k, i) => {
-    ctx.fillStyle = 'rgba(0,0,0,0.4)';
-    ctx.fillRect(w - 220, 30 + i * 16, 200, 14);
-    ctx.fillStyle = k.killer === 'YOU' ? COLORS.tColor : 'white';
-    ctx.font = '10px monospace';
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(w - 250, 40 + i * 22, 230, 18);
+    ctx.fillStyle = k.killer === 'YOU' ? COLORS.tColor : '#FFFFFF';
+    ctx.font = '12px monospace';
     ctx.textAlign = 'right';
-    ctx.fillText(`${k.killer} → ${k.victim}`, w - 30, 42 + i * 16);
+    const hs = k.headshot ? ' (HS)' : '';
+    ctx.fillText(`${k.killer} → ${k.victim}${hs}`, w - 30, 55 + i * 22);
   });
 
-  // Bottom HUD
-  ctx.fillStyle = 'rgba(0,0,0,0.6)';
-  ctx.fillRect(0, h - 50, w, 50);
+  // === BOTTOM BAR - CS2 STYLE ===
+  const barH = 80;
+  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  ctx.fillRect(0, h - barH, w, barH);
 
-  // Health
-  ctx.fillStyle = 'white';
+  // LEFT SIDE - Health & Armor
+  ctx.fillStyle = '#FFFFFF';
   ctx.font = '14px monospace';
   ctx.textAlign = 'left';
-  ctx.fillText(`❤ ${player.health}`, 20, h - 20);
+  ctx.fillText('HEALTH', 20, h - 55);
   
-  // Money
-  ctx.fillStyle = COLORS.money;
-  ctx.fillText(`$${player.money}`, 20, h - 35);
+  // Health bar
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  ctx.fillRect(20, h - 45, 150, 10);
+  ctx.fillStyle = player.health > 50 ? '#6BFF6B' : player.health > 20 ? '#FFB84B' : '#FF6B6B';
+  ctx.fillRect(20, h - 45, 150 * (player.health / 100), 10);
+  
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 20px monospace';
+  ctx.fillText(`${player.health}`, 180, h - 40);
 
-  // Ammo
-  ctx.textAlign = 'right';
-  ctx.fillStyle = player.ammo <= 5 ? '#FF6B6B' : 'white';
-  ctx.font = 'bold 18px monospace';
-  ctx.fillText(`${player.ammo}`, w - 30, h - 20);
-  ctx.fillStyle = '#888';
+  // Armor (placeholder)
+  ctx.fillStyle = '#4B9EFF';
+  ctx.fillRect(20, h - 30, 150, 5);
+  ctx.fillStyle = '#FFFFFF';
   ctx.font = '12px monospace';
-  ctx.fillText(`/ ${player.reserveAmmo}`, w - 30, h - 35);
-  ctx.fillStyle = 'white';
-  ctx.font = '10px monospace';
-  ctx.fillText(player.weapon.name, w - 30, h - 45);
+  ctx.fillText('ARMOR', 20, h - 15);
 
-  // Weapon slots
-  const slots = [
-    { key: '1', name: player.primaryWeapon?.name || '—', active: player.activeSlot === 'primary' },
-    { key: '2', name: player.secondaryWeapon?.name || '—', active: player.activeSlot === 'secondary' },
-    { key: '3', name: 'Knife', active: player.activeSlot === 'knife' },
+  // MONEY - LEFT CENTER
+  ctx.fillStyle = COLORS.money;
+  ctx.font = 'bold 24px monospace';
+  ctx.fillText(`$${player.money}`, 250, h - 30);
+
+  // === WEAPONS STACKED ON RIGHT - CS2 STYLE ===
+  const weapons = [
+    { name: player.primaryWeapon?.name || '—', ammo: player.activeSlot === 'primary' ? player.ammo : player.primaryWeapon?.ammo || 0, 
+      reserve: player.activeSlot === 'primary' ? player.reserveAmmo : player.primaryWeapon?.reserveAmmo || 0, active: player.activeSlot === 'primary' },
+    { name: player.secondaryWeapon?.name || '—', ammo: player.activeSlot === 'secondary' ? player.ammo : player.secondaryWeapon?.ammo || 0, 
+      reserve: player.activeSlot === 'secondary' ? player.reserveAmmo : player.secondaryWeapon?.reserveAmmo || 0, active: player.activeSlot === 'secondary' },
+    { name: 'KNIFE', ammo: '—', reserve: '—', active: player.activeSlot === 'knife' },
   ];
-  
-  slots.forEach((slot, i) => {
-    const x = w/2 - 80 + i * 60;
-    ctx.fillStyle = slot.active ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)';
-    ctx.fillRect(x, h - 45, 50, 20);
-    ctx.fillStyle = slot.active ? '#FFD700' : '#888';
-    ctx.font = '9px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(`[${slot.key}]`, x + 25, h - 30);
-    ctx.font = '7px monospace';
-    ctx.fillText(slot.name.substring(0, 6), x + 25, h - 20);
+
+  weapons.forEach((weapon, i) => {
+    const y = h - 75 + i * 25;
+    
+    // Background
+    ctx.fillStyle = weapon.active ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.3)';
+    ctx.fillRect(w - 250, y, 230, 22);
+    
+    // Weapon name
+    ctx.fillStyle = weapon.active ? '#FFD700' : '#888';
+    ctx.font = 'bold 12px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(weapon.name, w - 240, y + 15);
+    
+    // Ammo
+    if (weapon.ammo !== '—') {
+      ctx.fillStyle = weapon.active ? '#FFFFFF' : '#666';
+      ctx.font = 'bold 14px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(`${weapon.ammo}`, w - 60, y + 15);
+      ctx.fillStyle = '#888';
+      ctx.font = '12px monospace';
+      ctx.fillText(`/ ${weapon.reserve}`, w - 30, y + 15);
+    } else {
+      ctx.fillStyle = '#888';
+      ctx.font = '12px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('∞', w - 30, y + 15);
+    }
   });
 
+  // Current weapon highlight
+  if (player.reloadTimer > 0) {
+    ctx.fillStyle = '#FFD700';
+    ctx.font = '12px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('RELOADING...', w - 130, h - 10);
+  }
+
+  if (player.isCrouching) {
+    ctx.fillStyle = '#888';
+    ctx.font = '10px monospace';
+    ctx.fillText('CROUCHING', w - 130, h - 25);
+  }
+
   if (state.buyMenuOpen) renderBuyMenu(ctx, w, h, state);
-  if (map) drawMinimap(ctx, w, h, state, map);
+  drawMinimap(ctx, w, h, state);
 }
 
-function drawMinimap(ctx: CanvasRenderingContext2D, w: number, h: number, state: GameState, map: GameMap) {
-  const size = 120;
-  const x = w - size - 10;
-  const y = 10;
+function drawMinimap(ctx: CanvasRenderingContext2D, w: number, h: number, state: GameState) {
+  const size = 140;
+  const x = w - size - 20;
+  const y = 50;
+  const map = state.currentMap;
   const scale = size / map.width;
 
-  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
   ctx.fillRect(x, y, size, size);
 
   // Walls
@@ -355,19 +383,28 @@ function drawMinimap(ctx: CanvasRenderingContext2D, w: number, h: number, state:
                  Math.max(2, wall.w * scale), Math.max(2, wall.h * scale));
   }
 
+  // Allies
+  for (const ally of state.allies) {
+    if (!ally.alive) continue;
+    ctx.fillStyle = '#6BFF6B';
+    ctx.beginPath();
+    ctx.arc(x + ally.pos.x * scale, y + ally.pos.y * scale, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   // Player
   const camTarget = getCameraTarget(state);
   ctx.fillStyle = state.player.alive ? '#FFD700' : '#888';
   ctx.beginPath();
-  ctx.arc(x + camTarget.x * scale, y + camTarget.y * scale, 3, 0, Math.PI * 2);
+  ctx.arc(x + camTarget.x * scale, y + camTarget.y * scale, 4, 0, Math.PI * 2);
   ctx.fill();
 }
 
 function renderBuyMenu(ctx: CanvasRenderingContext2D, w: number, h: number, state: GameState) {
-  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  ctx.fillStyle = 'rgba(0,0,0,0.9)';
   ctx.fillRect(0, 0, w, h);
 
-  const menuW = 500, menuH = 350;
+  const menuW = 600, menuH = 400;
   const mx = w/2 - menuW/2, my = h/2 - menuH/2;
 
   ctx.fillStyle = '#1A1F2E';
@@ -376,19 +413,19 @@ function renderBuyMenu(ctx: CanvasRenderingContext2D, w: number, h: number, stat
   ctx.lineWidth = 2;
   ctx.strokeRect(mx, my, menuW, menuH);
 
-  ctx.fillStyle = 'white';
-  ctx.font = 'bold 20px monospace';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 24px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('BUY MENU', w/2, my + 30);
+  ctx.fillText('BUY MENU', w/2, my + 40);
   ctx.fillStyle = COLORS.money;
-  ctx.fillText(`$${state.player.money}`, w/2, my + 50);
+  ctx.fillText(`$${state.player.money}`, w/2, my + 70);
 
-  const catY = my + 70;
+  const catY = my + 100;
   BUY_CATEGORIES.forEach((cat, i) => {
     ctx.fillStyle = state.buyMenuCategory === i ? '#4B9EFF' : '#888';
-    ctx.font = '12px monospace';
+    ctx.font = '14px monospace';
     ctx.textAlign = 'left';
-    ctx.fillText(`${i+1}. ${cat.name}`, mx + 20, catY + i * 25);
+    ctx.fillText(`${i+1}. ${cat.name}`, mx + 30, catY + i * 30);
   });
 
   const category = BUY_CATEGORIES[state.buyMenuCategory];
@@ -397,22 +434,22 @@ function renderBuyMenu(ctx: CanvasRenderingContext2D, w: number, h: number, stat
       const def = WEAPONS[weaponId];
       if (!def) return;
       
-      const y = my + 70 + i * 30;
+      const y = my + 100 + i * 35;
       const selected = state.buyMenuSelection === i;
       
       ctx.fillStyle = selected ? '#2A2F3E' : 'transparent';
-      ctx.fillRect(mx + 150, y - 12, 300, 24);
+      ctx.fillRect(mx + 200, y - 15, 320, 28);
       
-      ctx.fillStyle = def.side !== 'both' && def.side !== state.playerTeam ? '#FF6B6B' : 'white';
-      ctx.font = '12px monospace';
-      ctx.fillText(def.name, mx + 160, y);
+      ctx.fillStyle = def.side !== 'both' && def.side !== state.playerTeam ? '#FF6B6B' : '#FFFFFF';
+      ctx.font = '14px monospace';
+      ctx.fillText(def.name, mx + 210, y);
       ctx.fillStyle = state.player.money >= def.price ? COLORS.money : '#FF6B6B';
-      ctx.fillText(`$${def.price}`, mx + 320, y);
+      ctx.fillText(`$${def.price}`, mx + 450, y);
     });
   }
 
   ctx.fillStyle = '#888';
-  ctx.font = '10px monospace';
+  ctx.font = '12px monospace';
   ctx.fillText('1-5: Category | ↑↓: Select | ENTER: Buy | ESC: Close', w/2, my + menuH - 20);
 }
 
@@ -424,97 +461,117 @@ export function renderMenu(
 ) {
   const w = canvas.width, h = canvas.height;
 
-  // Simple gradient background
+  // CS2 Menu style
   const gradient = ctx.createLinearGradient(0, 0, 0, h);
-  gradient.addColorStop(0, '#0A0F1A');
-  gradient.addColorStop(1, '#1A2533');
+  gradient.addColorStop(0, '#0F1A2F');
+  gradient.addColorStop(1, '#1F2A3F');
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, w, h);
 
+  // === CS2 TOP BAR ===
+  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  ctx.fillRect(0, 0, w, 60);
+
+  // Menu items
+  const menuItems = ['INVENTORY', 'LOADOUT', 'PLAY', 'NEWS'];
+  menuItems.forEach((item, i) => {
+    ctx.fillStyle = item === 'PLAY' ? '#4B9EFF' : '#888';
+    ctx.font = 'bold 18px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(item, 150 + i * 120, 35);
+  });
+
+  // Cafe text (from your image)
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = '14px monospace';
+  ctx.textAlign = 'right';
+  ctx.fillText('CAFE', w - 50, 35);
+
   // Title
-  ctx.fillStyle = '#4B9EFF';
+  ctx.shadowColor = '#4B9EFF';
+  ctx.shadowBlur = 20;
+  ctx.fillStyle = '#FFFFFF';
   ctx.font = 'bold 64px monospace';
   ctx.textAlign = 'center';
   ctx.fillText('CS2D', w/2, h/2 - 150);
+  ctx.shadowBlur = 0;
 
-  // Map buttons - FIXED: proper positioning
-  ctx.fillStyle = 'white';
-  ctx.font = '16px monospace';
-  ctx.fillText('SELECT MAP', w/2, h/2 - 90);
+  // Map selection
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = '18px monospace';
+  ctx.fillText('SELECT MAP', w/2, h/2 - 80);
 
   for (let i = 0; i < MAPS.length; i++) {
-    const x = w/2 - 150 + i * 200; // Fixed: proper spacing
-    const y = h/2 - 60;
+    const x = w/2 - 150 + i * 200;
+    const y = h/2 - 50;
     
     ctx.fillStyle = state.selectedMapIndex === i ? '#4B9EFF' : '#2A2F3E';
-    ctx.fillRect(x, y, 120, 40);
+    ctx.fillRect(x, y, 140, 40);
     
-    ctx.fillStyle = 'white';
-    ctx.font = '14px monospace';
-    ctx.fillText(MAPS[i].name, x + 60, y + 25);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '16px monospace';
+    ctx.fillText(MAPS[i].name, x + 70, y + 25);
   }
 
-  // Team buttons - FIXED: proper positioning
-  ctx.fillStyle = 'white';
-  ctx.font = '16px monospace';
-  ctx.fillText('SELECT TEAM', w/2, h/2);
+  // Team selection
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = '18px monospace';
+  ctx.fillText('SELECT TEAM', w/2, h/2 + 20);
 
-  const btnY = h/2 + 20;
+  const btnY = h/2 + 40;
   
   // T button
   ctx.fillStyle = state.playerTeam === 't' ? '#FFB84B' : '#2A2F3E';
-  ctx.fillRect(w/2 - 140, btnY, 120, 40);
-  ctx.fillStyle = 'white';
-  ctx.fillText('T', w/2 - 80, btnY + 25);
+  ctx.fillRect(w/2 - 160, btnY, 140, 50);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 20px monospace';
+  ctx.fillText('T', w/2 - 90, btnY + 32);
   
   // CT button
   ctx.fillStyle = state.playerTeam === 'ct' ? '#4B9EFF' : '#2A2F3E';
-  ctx.fillRect(w/2 + 20, btnY, 120, 40);
-  ctx.fillStyle = 'white';
-  ctx.fillText('CT', w/2 + 80, btnY + 25);
+  ctx.fillRect(w/2 + 20, btnY, 140, 50);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText('CT', w/2 + 90, btnY + 32);
 
-  // Enemy slider - FIXED: proper mouse tracking
-  ctx.fillStyle = 'white';
+  // Sliders
+  ctx.fillStyle = '#FFFFFF';
   ctx.font = '14px monospace';
-  ctx.fillText(`ENEMIES: ${state.enemyCount}`, w/2, h/2 + 80);
+  ctx.fillText(`ENEMIES: ${state.enemyCount}`, w/2, h/2 + 110);
 
   const sliderW = 300;
   const sliderX = w/2 - sliderW/2;
-  const sliderY = h/2 + 90;
+  
+  // Enemy slider
+  ctx.fillStyle = '#2A2F3E';
+  ctx.fillRect(sliderX, h/2 + 120, sliderW, 10);
+  ctx.fillStyle = '#FF6B6B';
+  ctx.fillRect(sliderX, h/2 + 120, ((state.enemyCount - 1) / 9) * sliderW, 10);
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText(`ALLIES: ${state.allyCount}`, w/2, h/2 + 150);
   
   ctx.fillStyle = '#2A2F3E';
-  ctx.fillRect(sliderX, sliderY, sliderW, 10);
-  
-  ctx.fillStyle = '#4B9EFF';
-  const knobX = sliderX + ((state.enemyCount - 1) / 9) * sliderW;
-  ctx.fillRect(sliderX, sliderY, knobX - sliderX, 10);
+  ctx.fillRect(sliderX, h/2 + 160, sliderW, 10);
+  ctx.fillStyle = '#6BFF6B';
+  ctx.fillRect(sliderX, h/2 + 160, (state.allyCount / 9) * sliderW, 10);
 
-  // Ally slider
-  ctx.fillStyle = 'white';
-  ctx.fillText(`ALLIES: ${state.allyCount}`, w/2, h/2 + 120);
-
-  const aSliderY = h/2 + 130;
-  ctx.fillStyle = '#2A2F3E';
-  ctx.fillRect(sliderX, aSliderY, sliderW, 10);
+  // Play button
+  const btnW = 200, btnH = 60;
+  const btnX = w/2 - btnW/2, btnY2 = h/2 + 190;
   
-  ctx.fillStyle = '#FFB84B';
-  const aKnobX = sliderX + (state.allyCount / 9) * sliderW;
-  ctx.fillRect(sliderX, aSliderY, aKnobX - sliderX, 10);
-
-  // Start button
-  const btnW = 200, btnH = 50;
-  const btnX = w/2 - btnW/2, btnY2 = h/2 + 160;
-  
+  ctx.shadowBlur = hoveredButton === 'start' ? 20 : 10;
+  ctx.shadowColor = hoveredButton === 'start' ? '#4B9EFF' : '#000000';
   ctx.fillStyle = hoveredButton === 'start' ? '#4B9EFF' : '#2A2F3E';
   ctx.fillRect(btnX, btnY2, btnW, btnH);
   
-  ctx.fillStyle = 'white';
-  ctx.font = 'bold 20px monospace';
-  ctx.fillText('PLAY', w/2, btnY2 + 32);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 24px monospace';
+  ctx.fillText('PLAY', w/2, btnY2 + 38);
 
   // Controls
   ctx.fillStyle = '#888';
   ctx.font = '12px monospace';
-  ctx.fillText('WASD: Move | Mouse: Aim | R: Reload | B: Buy', w/2, h/2 + 230);
-  ctx.fillText('1/2/3: Weapons | Ctrl: Crouch | Space: Jump', w/2, h/2 + 250);
+  ctx.fillText('WASD: Move | Mouse: Aim | R: Reload | B: Buy | F: Inspect', w/2, h/2 + 280);
+  ctx.fillText('1/2/3: Weapons | Ctrl: Crouch | Space: Jump | RMB: Scope', w/2, h/2 + 300);
 }
