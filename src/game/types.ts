@@ -33,6 +33,7 @@ export interface Player {
   isJumping: boolean;
   jumpTimer: number;
   isScoped: boolean;
+  skin?: SkinData; // Add skin for player
 }
 
 export interface Ally {
@@ -66,6 +67,7 @@ export interface Enemy {
   alertTimer: number;
   lastKnownPlayerPos: Vec2 | null;
   state: 'patrol' | 'alert' | 'chase';
+  path?: Vec2[]; // For navigation
 }
 
 export interface Bullet {
@@ -99,6 +101,7 @@ export interface Wall {
   w: number;
   h: number;
   jumpable?: boolean;
+  texture?: 'concrete' | 'metal' | 'wood' | 'brick'; // For better visuals
 }
 
 export interface Weapon {
@@ -121,4 +124,17 @@ export interface GameMap {
   height: number;
   bombSites: { pos: Vec2; label: string; radius: number }[];
   name: string;
+  groundTexture?: 'dust' | 'concrete' | 'grass' | 'tile'; // For better visuals
+}
+
+// Skin types
+export interface SkinData {
+  name: string;
+  weapon: string;
+  rarity: string;
+  collection: string;
+  url: string;
+  price?: { min: number; max: number };
+  pattern?: string;
+  wear?: 'FN' | 'MW' | 'FT' | 'WW' | 'BS';
 }
