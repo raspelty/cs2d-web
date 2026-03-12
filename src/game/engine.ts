@@ -106,7 +106,7 @@ export function startRound(state: GameState) {
   state.bullets = [];
   state.particles = [];
   state.bloodDecals = [];
-  state.roundTime: 115;
+  state.roundTime = 115;
   state.roundStatus = 'freezetime';
   state.freezeTimer = 5;
   state.enemies = [];
