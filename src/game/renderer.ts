@@ -574,7 +574,49 @@ function drawMinimap(ctx: CanvasRenderingContext2D, w: number, h: number, state:
   }
 
   // Player
-  const camTarget = getCameraTarget(state);
+   // === FOV CONE - ADD THIS RIGHT HERE ===
+  // Draw the vision cone first (behind player but above ground)
+  ctx.fillStyle = 'rgba(255, 255, 200, 0.08)';
+  ctx.beginPath();
+  ctx.moveTo(player.pos.x, player.pos.y);
+  ctx.arc(player.pos.x, player.pos.y, 400, player.angle - FOV_HALF_ANGLE, player.angle + FOV_HALF_ANGLE);
+  ctx.closePath();
+  ctx.fill();
+  
+  // Optional: Add a faint line at the edges of the cone
+  ctx.strokeStyle = 'rgba(255, 255, 200, 0.15)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(player.pos.x, player.pos.y);
+  ctx.lineTo(player.pos.x + Math.cos(player.angle - FOV_HALF_ANGLE) * 400, 
+             player.pos.y + Math.sin(player.angle - FOV_HALF_ANGLE) * 400);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(player.pos.x, player.pos.y);
+  ctx.lineTo(player.pos.x + Math.cos(player.angle + FOV_HALF_ANGLE) * 400, 
+             player.pos.y + Math.sin(player.angle + FOV_HALF_ANGLE) * 400);
+  ctx.stroke();
+
+  const radius = player.isCrouching ? player.radius * 0.85 : player.radius;
+  const teamColor = player.team === 't' ? COLORS.tColor : COLORS.ctColor;
+
+  // Jump shadow
+  if (player.isJumping) {
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.arc(player.pos.x, player.pos.y + 4, radius * 0.8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Player body
+  ctx.fillStyle = teamColor;
+  ctx.shadowColor = 'rgba(255,255,255,0.3)';
+  ctx.shadowBlur = 10;
+  const drawY = player.isJumping ? player.pos.y - 4 : player.pos.y;
+  ctx.beginPath();
+  ctx.arc(player.pos.x, drawY, radius, 0, Math.PI * 2);
+  ctx.fill();const camTarget = getCameraTarget(state);
   ctx.fillStyle = state.player.alive ? 'hsl(45, 100%, 60%)' : 'hsl(210, 10%, 60%)';
   ctx.beginPath();
   ctx.arc(x + camTarget.x * scale, y + camTarget.y * scale, 3, 0, Math.PI * 2);
