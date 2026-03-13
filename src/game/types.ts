@@ -33,7 +33,8 @@ export interface Player {
   isJumping: boolean;
   jumpTimer: number;
   isScoped: boolean;
-  skin?: SkinData; // Add skin for player
+  hasBomb: boolean;
+  skin?: SkinData;
 }
 
 export interface Ally {
@@ -51,6 +52,8 @@ export interface Ally {
   lastKnownEnemyPos: Vec2 | null;
   state: 'patrol' | 'alert' | 'chase';
   name: string;
+  isDefusing?: boolean;
+  defuseTimer?: number;
 }
 
 export interface Enemy {
@@ -66,8 +69,11 @@ export interface Enemy {
   patrolTarget: Vec2;
   alertTimer: number;
   lastKnownPlayerPos: Vec2 | null;
-  state: 'patrol' | 'alert' | 'chase';
-  path?: Vec2[]; // For navigation
+  lastKnownBombPos: Vec2 | null;
+  state: 'patrol' | 'alert' | 'chase' | 'defending' | 'searching';
+  path?: Vec2[];
+  isDefusing?: boolean;
+  defuseTimer?: number;
 }
 
 export interface Bullet {
@@ -76,6 +82,7 @@ export interface Bullet {
   time: number;
   isEnemy: boolean;
   isHeadshot?: boolean;
+  damage?: number;
 }
 
 export interface Particle {
@@ -101,7 +108,7 @@ export interface Wall {
   w: number;
   h: number;
   jumpable?: boolean;
-  texture?: 'concrete' | 'metal' | 'wood' | 'brick'; // For better visuals
+  texture?: 'concrete' | 'metal' | 'wood' | 'brick';
 }
 
 export interface Weapon {
@@ -114,20 +121,68 @@ export interface Weapon {
   reserveAmmo: number;
   spread: number;
   automatic: boolean;
+  skin?: SkinData;
 }
 
 export interface GameMap {
   walls: Wall[];
   spawnPoints: Vec2[];
   enemySpawns: Vec2[];
+  bombSites: { pos: Vec2; label: string; radius: number }[];
   width: number;
   height: number;
-  bombSites: { pos: Vec2; label: string; radius: number }[];
   name: string;
-  groundTexture?: 'dust' | 'concrete' | 'grass' | 'tile'; // For better visuals
+  groundTexture?: 'dust' | 'concrete';
+  props?: Prop[];
 }
 
-// Skin types
+export interface Prop {
+  pos: Vec2;
+  type: 'box' | 'barrel' | 'car' | 'dumpster' | 'pallet' | 'tire' | 'van';
+  width: number;
+  height: number;
+}
+
+export interface Bomb {
+  pos: Vec2;
+  isPlanted: boolean;
+  isDefused: boolean;
+  plantedTime: number;
+  defuseTime: number;
+  plantedBy: 't' | 'ct';
+  site?: string;
+  defusingPlayer?: 'player' | 'ally' | 'enemy';
+  defuseStartTime?: number;
+}
+
+export interface Settings {
+  volume: number;
+  musicVolume: number;
+  sensitivity: number;
+  crosshairColor: string;
+  crosshairSize: number;
+  crosshairStyle: 'default' | 'dot' | 'cross';
+  showFPS: boolean;
+  showKillFeed: boolean;
+  showMinimap: boolean;
+  showDamage: boolean;
+  showImpactMarkers: boolean;
+  mouseInvert: boolean;
+  showBlood: boolean;
+}
+
+export interface LeaderboardEntry {
+  name: string;
+  kills: number;
+  deaths: number;
+  assists: number;
+  money: number;
+  team: 't' | 'ct';
+  isPlayer: boolean;
+  ping: number;
+  alive: boolean;
+}
+
 export interface SkinData {
   name: string;
   weapon: string;
