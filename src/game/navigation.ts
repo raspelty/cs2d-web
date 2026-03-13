@@ -1,172 +1,192 @@
-import { Vec2, Wall } from './types';
-
-interface Node {
-  pos: Vec2;
-  connections: number[];
-}
-
-export class NavigationMesh {
-  nodes: Node[] = [];
-  gridSize = 60;
+function updateEnemies(state: GameState, dt: number) {
+  const map = state.currentMap;
+  if (!state.navMesh) return;
   
-  constructor(mapWidth: number, mapHeight: number, walls: Wall[]) {
-    this.generateNodes(mapWidth, mapHeight, walls);
-  }
-  
-  private generateNodes(width: number, height: number, walls: Wall[]) {
-    // Create a grid of potential nodes
-    for (let x = 40; x < width - 40; x += this.gridSize) {
-      for (let y = 40; y < height - 40; y += this.gridSize) {
-        if (this.isPointValid({ x, y }, walls)) {
-          this.nodes.push({ pos: { x, y }, connections: [] });
+  for (const enemy of state.enemies) {
+    if (!enemy.alive) continue;
+
+    // Stuck detection
+    if (!enemy.hasOwnProperty('stuckTimer')) {
+      (enemy as any).stuckTimer = 0;
+      (enemy as any).lastPos = { ...enemy.pos };
+      (enemy as any).pathUpdateTimer = 0;
+      (enemy as any).investigateTimer = 0;
+    }
+
+    // Check if stuck
+    const distMoved = distance(enemy.pos, (enemy as any).lastPos);
+    if (distMoved < 3) {
+      (enemy as any).stuckTimer += dt;
+    } else {
+      (enemy as any).stuckTimer = 0;
+    }
+    (enemy as any).lastPos = { ...enemy.pos };
+
+    // If stuck for too long, teleport a bit
+    if ((enemy as any).stuckTimer > 3) {
+      (enemy as any).stuckTimer = 0;
+      const newPos = state.navMesh.getRandomPositionInArea(enemy.pos, 100);
+      enemy.pos = newPos;
+      enemy.path = undefined;
+    }
+
+    // Determine target based on game state
+    let targetPos: Vec2 | null = null;
+    let canSeeTarget = false;
+    let priority = 0;
+
+    // Priority 1: Bomb if planted
+    if (state.bomb && state.bomb.isPlanted && !state.bomb.isDefused) {
+      targetPos = state.bomb.pos;
+      priority = 3;
+      enemy.state = 'defending';
+    }
+
+    // Priority 2: Player if visible
+    if (state.player.alive) {
+      const canSeePlayer = hasLineOfSight(enemy.pos, state.player.pos, map.walls);
+      const distToPlayer = distance(enemy.pos, state.player.pos);
+      
+      if (canSeePlayer && distToPlayer < 800) {
+        targetPos = state.player.pos;
+        canSeeTarget = true;
+        priority = 2;
+        enemy.state = 'chase';
+        enemy.lastKnownPlayerPos = { ...state.player.pos };
+        enemy.alertTimer = 10;
+      } else if (enemy.lastKnownPlayerPos && distToPlayer < 1000) {
+        // Investigate last known position
+        targetPos = enemy.lastKnownPlayerPos;
+        priority = 1;
+        enemy.state = 'searching';
+        (enemy as any).investigateTimer += dt;
+        
+        // Give up searching after 10 seconds
+        if ((enemy as any).investigateTimer > 10) {
+          enemy.lastKnownPlayerPos = null;
+          enemy.state = 'patrol';
         }
       }
     }
-    
-    // Connect nearby nodes that have line of sight
-    for (let i = 0; i < this.nodes.length; i++) {
-      for (let j = i + 1; j < this.nodes.length; j++) {
-        const dist = this.distance(this.nodes[i].pos, this.nodes[j].pos);
-        if (dist < this.gridSize * 1.8) {
-          if (this.hasLineOfSight(this.nodes[i].pos, this.nodes[j].pos, walls)) {
-            this.nodes[i].connections.push(j);
-            this.nodes[j].connections.push(i);
+
+    // Priority 3: Allies if visible
+    if (!targetPos || priority < 2) {
+      for (const ally of state.allies) {
+        if (!ally.alive) continue;
+        if (hasLineOfSight(enemy.pos, ally.pos, map.walls) && 
+            distance(enemy.pos, ally.pos) < 600) {
+          targetPos = ally.pos;
+          canSeeTarget = true;
+          enemy.state = 'chase';
+          break;
+        }
+      }
+    }
+
+    // If no target, patrol
+    if (!targetPos) {
+      enemy.alertTimer -= dt;
+      
+      if (enemy.alertTimer <= 0 || !enemy.patrolTarget) {
+        enemy.state = 'patrol';
+        enemy.patrolTarget = state.navMesh.getRandomPosition();
+        targetPos = enemy.patrolTarget;
+      } else {
+        targetPos = enemy.patrolTarget;
+      }
+    }
+
+    // Pathfinding and movement
+    if (targetPos) {
+      // Update path periodically
+      (enemy as any).pathUpdateTimer += dt;
+      if (!enemy.path || enemy.path.length === 0 || (enemy as any).pathUpdateTimer > 0.8) {
+        (enemy as any).pathUpdateTimer = 0;
+        enemy.path = state.navMesh.findPath(enemy.pos, targetPos);
+      }
+
+      // Follow path
+      if (enemy.path && enemy.path.length > 0) {
+        let targetPoint = enemy.path[0];
+        
+        if (distance(enemy.pos, targetPoint) < 25) {
+          enemy.path.shift();
+          if (enemy.path.length > 0) {
+            targetPoint = enemy.path[0];
+          }
+        }
+
+        if (targetPoint) {
+          const dir = normalize({
+            x: targetPoint.x - enemy.pos.x,
+            y: targetPoint.y - enemy.pos.y
+          });
+
+          // Speed based on state
+          let speed = enemy.speed;
+          if (enemy.state === 'patrol') speed *= 0.5;
+          if (enemy.state === 'defending') speed *= 0.7;
+
+          const newX = enemy.pos.x + dir.x * speed * dt;
+          const newY = enemy.pos.y + dir.y * speed * dt;
+
+          // Collision detection
+          let canMove = true;
+          for (const wall of map.walls) {
+            if (circleRectCollision(newX, newY, enemy.radius, wall.x, wall.y, wall.w, wall.h)) {
+              canMove = false;
+              break;
+            }
+          }
+
+          // Avoid other enemies
+          for (const other of state.enemies) {
+            if (other.id !== enemy.id && other.alive) {
+              if (distance({ x: newX, y: newY }, other.pos) < enemy.radius * 2.5) {
+                canMove = false;
+                break;
+              }
+            }
+          }
+
+          if (canMove) {
+            enemy.pos.x = newX;
+            enemy.pos.y = newY;
+          } else {
+            // Try a different direction
+            const avoidDir = {
+              x: dir.y * 0.5,
+              y: -dir.x * 0.5
+            };
+            enemy.pos.x += avoidDir.x * speed * dt;
+            enemy.pos.y += avoidDir.y * speed * dt;
           }
         }
       }
     }
-  }
-  
-  private isPointValid(pos: Vec2, walls: Wall[]): boolean {
-    for (const wall of walls) {
-      if (pos.x > wall.x - 25 && pos.x < wall.x + wall.w + 25 &&
-          pos.y > wall.y - 25 && pos.y < wall.y + wall.h + 25) {
-        return false;
-      }
+
+    // Update angle to face target
+    if (targetPos) {
+      enemy.angle = Math.atan2(targetPos.y - enemy.pos.y, targetPos.x - enemy.pos.x);
     }
-    return true;
-  }
-  
-  private hasLineOfSight(a: Vec2, b: Vec2, walls: Wall[]): boolean {
-    for (const wall of walls) {
-      if (this.lineIntersectsRect(a, b, wall)) return false;
-    }
-    return true;
-  }
-  
-  private lineIntersectsRect(a: Vec2, b: Vec2, wall: Wall): boolean {
-    const minX = Math.min(a.x, b.x);
-    const maxX = Math.max(a.x, b.x);
-    const minY = Math.min(a.y, b.y);
-    const maxY = Math.max(a.y, b.y);
-    
-    if (maxX < wall.x || minX > wall.x + wall.w || 
-        maxY < wall.y || minY > wall.y + wall.h) {
-      return false;
-    }
-    return true;
-  }
-  
-  private distance(a: Vec2, b: Vec2): number {
-    return Math.hypot(a.x - b.x, a.y - b.y);
-  }
-  
-  findPath(start: Vec2, goal: Vec2, walls: Wall[]): Vec2[] {
-    let startNode = this.findNearestNode(start);
-    let goalNode = this.findNearestNode(goal);
-    
-    if (startNode === -1 || goalNode === -1) return [goal];
-    
-    const openSet = new Set<number>([startNode]);
-    const cameFrom = new Map<number, number>();
-    const gScore = new Map<number, number>();
-    const fScore = new Map<number, number>();
-    
-    gScore.set(startNode, 0);
-    fScore.set(startNode, this.distance(this.nodes[startNode].pos, this.nodes[goalNode].pos));
-    
-    while (openSet.size > 0) {
-      let current = this.getLowestFScore(openSet, fScore);
-      
-      if (current === goalNode) {
-        return this.reconstructPath(cameFrom, current, this.nodes, start, goal);
-      }
-      
-      openSet.delete(current);
-      
-      for (const neighbor of this.nodes[current].connections) {
-        const tentativeG = (gScore.get(current) || Infinity) + 
-          this.distance(this.nodes[current].pos, this.nodes[neighbor].pos);
+
+    // Shooting
+    enemy.shootCooldown -= dt;
+    if (targetPos && canSeeTarget && enemy.shootCooldown <= 0) {
+      const distToTarget = distance(enemy.pos, targetPos);
+      if (distToTarget < 700) {
+        // Accuracy based on distance and enemy state
+        let accuracy = 0.7;
+        if (enemy.state === 'defending') accuracy = 0.8;
+        if (enemy.state === 'patrol') accuracy = 0.4;
+        accuracy *= (1 - distToTarget / 1000);
         
-        if (tentativeG < (gScore.get(neighbor) || Infinity)) {
-          cameFrom.set(neighbor, current);
-          gScore.set(neighbor, tentativeG);
-          fScore.set(neighbor, tentativeG + 
-            this.distance(this.nodes[neighbor].pos, this.nodes[goalNode].pos));
-          openSet.add(neighbor);
+        if (Math.random() < accuracy) {
+          enemyShoot(state, enemy, targetPos);
+        } else {
+          enemy.shootCooldown = 0.2;
         }
       }
     }
-    
-    return [goal];
-  }
-  
-  private findNearestNode(pos: Vec2): number {
-    let bestDist = Infinity;
-    let bestIdx = -1;
-    
-    for (let i = 0; i < this.nodes.length; i++) {
-      const dist = this.distance(pos, this.nodes[i].pos);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestIdx = i;
-      }
-    }
-    
-    return bestIdx;
-  }
-  
-  private getLowestFScore(set: Set<number>, fScore: Map<number, number>): number {
-    let best = -1;
-    let bestScore = Infinity;
-    
-    for (const idx of set) {
-      const score = fScore.get(idx) || Infinity;
-      if (score < bestScore) {
-        bestScore = score;
-        best = idx;
-      }
-    }
-    
-    return best;
-  }
-  
-  private reconstructPath(
-    cameFrom: Map<number, number>, 
-    current: number,
-    nodes: Node[],
-    start: Vec2,
-    goal: Vec2
-  ): Vec2[] {
-    const path: Vec2[] = [];
-    let nodeIdx = current;
-    
-    while (cameFrom.has(nodeIdx)) {
-      path.unshift(nodes[nodeIdx].pos);
-      nodeIdx = cameFrom.get(nodeIdx)!;
-    }
-    
-    if (path.length > 0) {
-      path.unshift(start);
-      path.push(goal);
-    }
-    
-    return path;
-  }
-  
-  getRandomValidPosition(walls: Wall[]): Vec2 {
-    const validNodes = this.nodes.filter(node => this.isPointValid(node.pos, walls));
-    if (validNodes.length === 0) return { x: 500, y: 500 };
-    return validNodes[Math.floor(Math.random() * validNodes.length)].pos;
   }
 }
