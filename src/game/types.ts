@@ -17,7 +17,7 @@ export interface Player {
   primaryWeapon: Weapon | null;
   secondaryWeapon: Weapon | null;
   knife: Weapon;
-  activeSlot: 'primary' | 'secondary' | 'knife';
+  activeSlot: 'primary' | 'secondary' | 'knife' | 'grenade' | 'equipment';
   alive: boolean;
   reloadTimer: number;
   shootCooldown: number;
@@ -35,6 +35,11 @@ export interface Player {
   isScoped: boolean;
   hasBomb: boolean;
   skin?: SkinData;
+  equipment: PlayerEquipment;
+  selectedGrenade: GrenadeType;
+  throwPower: number;
+  isThrowing: boolean;
+  throwTimer: number;
 }
 
 export interface Ally {
@@ -50,10 +55,11 @@ export interface Ally {
   patrolTarget: Vec2;
   alertTimer: number;
   lastKnownEnemyPos: Vec2 | null;
-  state: 'patrol' | 'alert' | 'chase';
+  state: 'patrol' | 'alert' | 'chase' | 'retreat';
   name: string;
   isDefusing?: boolean;
   defuseTimer?: number;
+  equipment?: PlayerEquipment;
 }
 
 export interface Enemy {
@@ -70,10 +76,11 @@ export interface Enemy {
   alertTimer: number;
   lastKnownPlayerPos: Vec2 | null;
   lastKnownBombPos: Vec2 | null;
-  state: 'patrol' | 'alert' | 'chase' | 'defending' | 'searching';
+  state: 'patrol' | 'alert' | 'chase' | 'defending' | 'searching' | 'retreat';
   path?: Vec2[];
   isDefusing?: boolean;
   defuseTimer?: number;
+  equipment?: PlayerEquipment;
 }
 
 export interface Bullet {
@@ -83,6 +90,37 @@ export interface Bullet {
   isEnemy: boolean;
   isHeadshot?: boolean;
   damage?: number;
+}
+
+export interface Grenade {
+  id: string;
+  type: 'he' | 'flash' | 'smoke' | 'molotov' | 'decoy';
+  pos: Vec2;
+  vel: Vec2;
+  angle: number;
+  fuse: number;
+  exploded: boolean;
+  owner: 'player' | 'ally' | 'enemy';
+  ownerId?: number;
+  radius: number;
+  damage?: number;
+  flashDuration?: number;
+  smokeDuration?: number;
+  smokeParticles?: SmokeParticle[];
+  flameParticles?: FlameParticle[];
+}
+
+export interface SmokeParticle {
+  pos: Vec2;
+  vel: Vec2;
+  life: number;
+  size: number;
+}
+
+export interface FlameParticle {
+  pos: Vec2;
+  life: number;
+  damage: number;
 }
 
 export interface Particle {
@@ -100,6 +138,7 @@ export interface KillFeedEntry {
   weapon: string;
   time: number;
   headshot?: boolean;
+  grenade?: boolean;
 }
 
 export interface Wall {
@@ -109,6 +148,7 @@ export interface Wall {
   h: number;
   jumpable?: boolean;
   texture?: 'concrete' | 'metal' | 'wood' | 'brick';
+  bulletproof?: boolean;
 }
 
 export interface Weapon {
@@ -122,6 +162,7 @@ export interface Weapon {
   spread: number;
   automatic: boolean;
   skin?: SkinData;
+  type?: string;
 }
 
 export interface GameMap {
@@ -129,18 +170,22 @@ export interface GameMap {
   spawnPoints: Vec2[];
   enemySpawns: Vec2[];
   bombSites: { pos: Vec2; label: string; radius: number }[];
+  hostageZones?: { pos: Vec2; rescued: boolean }[];
   width: number;
   height: number;
   name: string;
-  groundTexture?: 'dust' | 'concrete';
+  groundTexture?: 'dust' | 'concrete' | 'grass' | 'tile';
   props?: Prop[];
+  ambientSound?: string;
 }
 
 export interface Prop {
   pos: Vec2;
-  type: 'box' | 'barrel' | 'car' | 'dumpster' | 'pallet' | 'tire' | 'van';
+  type: 'box' | 'barrel' | 'car' | 'dumpster' | 'pallet' | 'tire' | 'van' | 'cover';
   width: number;
   height: number;
+  destructible?: boolean;
+  health?: number;
 }
 
 export interface Bomb {
@@ -153,6 +198,22 @@ export interface Bomb {
   site?: string;
   defusingPlayer?: 'player' | 'ally' | 'enemy';
   defuseStartTime?: number;
+  beepInterval?: number;
+  lastBeep?: number;
+}
+
+export interface PlayerEquipment {
+  armor: number;
+  helmet: boolean;
+  hasDefuse: boolean;
+  hasZeus: boolean;
+  grenades: {
+    he: number;
+    flash: number;
+    smoke: number;
+    molotov: number;
+    decoy: number;
+  };
 }
 
 export interface Settings {
@@ -161,7 +222,7 @@ export interface Settings {
   sensitivity: number;
   crosshairColor: string;
   crosshairSize: number;
-  crosshairStyle: 'default' | 'dot' | 'cross';
+  crosshairStyle: 'default' | 'dot' | 'cross' | 'circle';
   showFPS: boolean;
   showKillFeed: boolean;
   showMinimap: boolean;
@@ -169,6 +230,9 @@ export interface Settings {
   showImpactMarkers: boolean;
   mouseInvert: boolean;
   showBlood: boolean;
+  showGrenadeTrajectory: boolean;
+  autoSwitchGrenade: boolean;
+  quickSwitch: boolean;
 }
 
 export interface LeaderboardEntry {
@@ -177,10 +241,12 @@ export interface LeaderboardEntry {
   deaths: number;
   assists: number;
   money: number;
-  team: 't' | 'ct';
+  team: 'ct' | 't';
   isPlayer: boolean;
   ping: number;
   alive: boolean;
+  armor: number;
+  equipment: string;
 }
 
 export interface SkinData {
@@ -192,4 +258,15 @@ export interface SkinData {
   price?: { min: number; max: number };
   pattern?: string;
   wear?: 'FN' | 'MW' | 'FT' | 'WW' | 'BS';
+}
+
+export interface GameMode {
+  name: string;
+  type: 'casual' | 'deathmatch' | 'competitive' | 'armsrace' | 'demolition' | 'zombie' | 'hostage';
+  maxRounds?: number;
+  maxScore?: number;
+  respawn: boolean;
+  respawnTime?: number;
+  teamSwitch?: boolean;
+  description: string;
 }
