@@ -40,6 +40,7 @@ export interface Player {
   throwPower: number;
   isThrowing: boolean;
   throwTimer: number;
+  respawnTimer: number;
 }
 
 export interface Ally {
@@ -55,7 +56,7 @@ export interface Ally {
   patrolTarget: Vec2;
   alertTimer: number;
   lastKnownEnemyPos: Vec2 | null;
-  state: 'patrol' | 'alert' | 'chase' | 'retreat';
+  state: 'patrol' | 'alert' | 'chase' | 'retreat' | 'defending';
   name: string;
   isDefusing?: boolean;
   defuseTimer?: number;
@@ -81,6 +82,11 @@ export interface Enemy {
   isDefusing?: boolean;
   defuseTimer?: number;
   equipment?: PlayerEquipment;
+  stuckTimer?: number;
+  lastPos?: Vec2;
+  pathUpdateTimer?: number;
+  investigateTimer?: number;
+  idleTimer?: number;
 }
 
 export interface Bullet {
@@ -92,9 +98,11 @@ export interface Bullet {
   damage?: number;
 }
 
+export type GrenadeType = 'he' | 'flash' | 'smoke' | 'molotov' | 'decoy';
+
 export interface Grenade {
   id: string;
-  type: 'he' | 'flash' | 'smoke' | 'molotov' | 'decoy';
+  type: GrenadeType;
   pos: Vec2;
   vel: Vec2;
   angle: number;
@@ -269,4 +277,105 @@ export interface GameMode {
   respawnTime?: number;
   teamSwitch?: boolean;
   description: string;
+  infiniteMoney?: boolean;
+}
+
+export interface GameState {
+  // Game objects
+  player: Player;
+  enemies: Enemy[];
+  allies: Ally[];
+  bullets: Bullet[];
+  grenades: Grenade[];
+  particles: Particle[];
+  bloodDecals: { pos: Vec2; alpha: number }[];
+  killFeed: KillFeedEntry[];
+  
+  // Input
+  keys: Set<string>;
+  mousePos: Vec2;
+  mouseDown: boolean;
+  mouseRightDown: boolean;
+  
+  // Camera
+  camera: Vec2;
+  
+  // Round state
+  roundTime: number;
+  roundStatus: 'playing' | 'won' | 'lost' | 'freezetime' | 'bomb_planted' | 'bomb_defused' | 'bomb_exploded';
+  score: { kills: number; deaths: number; assists: number };
+  
+  // Game flow
+  gamePhase: 'menu' | 'playing' | 'skinSelect' | 'settings' | 'scoreboard';
+  hoveredButton: string | null;
+  
+  // IDs
+  nextEnemyId: number;
+  nextGrenadeId: number;
+  
+  // Buy menu
+  buyMenuOpen: boolean;
+  buyMenuCategory: number;
+  buyMenuSelection: number;
+  
+  // Timers
+  freezeTimer: number;
+  roundEndTimer: number;
+  respawnTimer: number;
+  
+  // Teams
+  playerTeam: 'ct' | 't';
+  currentRound: number;
+  maxRounds: number;
+  roundsWon: number;
+  roundsLost: number;
+  matchOver: boolean;
+  
+  // Counts
+  enemyCount: number;
+  allyCount: number;
+  
+  // Spectator
+  spectatingIndex: number;
+  spectatingMode: 'free' | 'follow' | 'firstperson';
+  
+  // Map
+  selectedMapIndex: number;
+  currentMap: GameMap;
+  currentMode: GameMode | null;
+  
+  // Navigation
+  navMesh: any; // Would be NavigationMesh type
+  enemyPaths: Map<number, Vec2[]>;
+  
+  // Skins
+  playerSkins: Map<string, SkinData>;
+  
+  // Effects
+  hitMarkers: { pos: Vec2; time: number; headshot: boolean; damage: number }[];
+  damageIndicators: { pos: Vec2; damage: number; time: number; isEnemy: boolean }[];
+  
+  // Bomb
+  bomb: Bomb | null;
+  isPlanting: boolean;
+  plantTimer: number;
+  isDefusing: boolean;
+  defuseTimer: number;
+  
+  // Settings & UI
+  settings: Settings;
+  showLeaderboard: boolean;
+  showSettings: boolean;
+  showPauseMenu: boolean;
+  showScoreboard: boolean;
+  fps: number;
+  
+  // Stats
+  lastHitTime: number;
+  hitAssists: Map<number, number>;
+  roundKills: number;
+  roundDamage: number;
+  matchKills: number;
+  matchDeaths: number;
+  matchAssists: number;
 }
